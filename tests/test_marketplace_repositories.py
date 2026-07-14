@@ -155,6 +155,35 @@ def test_accept_updates_both_stored_reservation_and_listing():
     assert listing_repo.get(listing.id).status == ListingStatus.RESERVED
 
 
+def test_cancel_reservation_restores_listing_via_service():
+    _, listing_repo, reservation_repo, _, _, mp = make_marketplace()
+    seller = mp.create_user("Seller", "seller@example.com")
+    buyer = mp.create_user("Buyer", "buyer@example.com")
+    mp.activate_user(seller.id)
+    mp.activate_user(buyer.id)
+
+    listing = mp.create_listing_for_user(
+        seller.id,
+        "Book",
+        "A book",
+        "Books",
+        ItemCondition.GOOD,
+        Decimal("12.50"),
+        "USD",
+        "Online",
+    )
+    mp.publish_listing(seller.id, listing.id)
+    reservation = mp.create_reservation(buyer.id, listing.id)
+
+    mp.accept_reservation(reservation.id, seller.id)
+    assert reservation_repo.get(reservation.id).status == ReservationStatus.ACCEPTED
+    assert listing_repo.get(listing.id).status == ListingStatus.RESERVED
+
+    mp.cancel_reservation(reservation.id)
+    assert reservation_repo.get(reservation.id).status == ReservationStatus.CANCELLED
+    assert listing_repo.get(listing.id).status == ListingStatus.PUBLISHED
+
+
 def test_unknown_ids_rejected():
     user_repo, listing_repo, reservation_repo, _, _, mp = make_marketplace()
     seller = mp.create_user("Seller", "seller@example.com")

@@ -440,3 +440,99 @@ class MarketplaceService:
         )
 
         return self.reservation_service.get_reservation(reservation_id)
+
+    def cancel_reservation(self, reservation_id: UUID) -> Reservation:
+        """Cancel a reservation and restore listing availability when appropriate.
+
+        Works with repository-backed or in-memory services.
+        """
+        if self._use_repositories():
+            try:
+                reservation = self.reservation_repository.get(reservation_id)
+            except EntityNotFoundError as exc:
+                raise MarketplaceWorkflowError("reservation not found") from exc
+
+            # Only allow cancelling from PENDING or ACCEPTED
+            if reservation.status not in {ReservationStatus.PENDING, ReservationStatus.ACCEPTED}:
+                raise MarketplaceWorkflowError("Can only cancel PENDING or ACCEPTED reservations")
+
+            old_status = reservation.status
+            cancelled = deepcopy(reservation)
+            cancelled.status = ReservationStatus.CANCELLED
+            cancelled.updated_at = datetime.now(UTC)
+            try:
+                self.reservation_repository.save(cancelled)
+            except Exception as exc:
+                raise MarketplaceWorkflowError("cannot cancel reservation") from exc
+
+            # If reservation was ACCEPTED, and no other ACCEPTED reservations exist for the listing,
+            # restore listing to PUBLISHED when it is currently RESERVED.
+            try:
+                if old_status == ReservationStatus.ACCEPTED:
+                    others = [r for r in self.reservation_repository.all() if r.listing_id == reservation.listing_id and r.status == ReservationStatus.ACCEPTED]
+                    if not others:
+                        listing = self.listing_repository.get(reservation.listing_id)
+                        if listing.status == ListingStatus.RESERVED:
+                            restored = deepcopy(listing)
+                            restored.status = ListingStatus.PUBLISHED
+                            restored.updated_at = datetime.now(UTC)
+                            self.listing_repository.save(restored)
+                            self._record_event(
+                                "commerce.listing.published",
+                                "Listing",
+                                restored.id,
+                                {"id": str(restored.id), "seller_id": str(restored.seller_id)},
+                            )
+            except Exception:
+                # best-effort restoration; do not fail the cancel operation
+                pass
+
+            self._record_event(
+                "commerce.reservation.cancelled",
+                "Reservation",
+                reservation_id,
+                {"id": str(reservation_id), "listing_id": str(reservation.listing_id)},
+            )
+            return self.reservation_repository.get(reservation_id)
+
+        # In-memory services
+        try:
+            reservation = self.reservation_service.get_reservation(reservation_id)
+        except Exception:
+            raise MarketplaceWorkflowError("reservation not found")
+
+        if reservation.status.name not in {"PENDING", "ACCEPTED"}:
+            raise MarketplaceWorkflowError("Can only cancel PENDING or ACCEPTED reservations")
+
+        old_status = reservation.status
+        try:
+            result = self.reservation_service.cancel(reservation_id)
+        except Exception as exc:
+            raise MarketplaceWorkflowError("cannot cancel reservation") from exc
+
+        # restore listing if needed
+        try:
+            if old_status.name == "ACCEPTED":
+                others = [r for r in self.reservation_service._store.values() if r.listing_id == reservation.listing_id and r.status.name == "ACCEPTED"]
+                if not others:
+                    listing = self.listing_service.get_listing(reservation.listing_id)
+                    if listing.status == ListingStatus.RESERVED:
+                        listing.status = ListingStatus.PUBLISHED
+                        listing.updated_at = datetime.now(UTC)
+                        self.listing_service._store[listing.id] = listing
+                        self._record_event(
+                            "commerce.listing.published",
+                            "Listing",
+                            listing.id,
+                            {"id": str(listing.id), "seller_id": str(listing.seller_id)},
+                        )
+        except Exception:
+            pass
+
+        self._record_event(
+            "commerce.reservation.cancelled",
+            "Reservation",
+            reservation_id,
+            {"id": str(reservation_id), "listing_id": str(reservation.listing_id)},
+        )
+        return result
