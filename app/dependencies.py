@@ -32,6 +32,29 @@ marketplace_service = MarketplaceService(
 )
 
 
+def reset_singletons() -> None:
+    """Test helper: reset singleton dependencies to fresh in-memory instances.
+
+    This is intended for tests only to restore isolation between test cases.
+    Runtime code should not call this; application behavior uses the module-level
+    singletons defined above.
+    """
+    global user_repository, listing_repository, reservation_repository
+    global event_store, event_recorder, marketplace_service
+
+    user_repository = MemoryUserRepository()
+    listing_repository = MemoryListingRepository()
+    reservation_repository = MemoryReservationRepository()
+    event_store = EventStore()
+    event_recorder = EventRecorder(event_store)
+    marketplace_service = MarketplaceService(
+        user_repository=user_repository,
+        listing_repository=listing_repository,
+        reservation_repository=reservation_repository,
+        event_recorder=event_recorder,
+    )
+
+
 def get_user_repository() -> MemoryUserRepository:
     return user_repository
 
