@@ -6,6 +6,9 @@ from typing import Optional
 from domain.listings.service import ListingService
 from domain.reservations.service import ReservationService
 from domain.users.service import UserService
+from typing import Any, Optional
+
+# LICOS EventRecorder is optional and not imported here to avoid coupling; accept any recorder with `record`.
 
 
 class MarketplaceWorkflowError(Exception):
@@ -18,10 +21,13 @@ class MarketplaceService:
         user_service: Optional[UserService] = None,
         listing_service: Optional[ListingService] = None,
         reservation_service: Optional[ReservationService] = None,
+        event_recorder: Optional[Any] = None,
     ) -> None:
         self.user_service = user_service or UserService()
         self.listing_service = listing_service or ListingService()
         self.reservation_service = reservation_service or ReservationService()
+        # event_recorder: object with `record(event_type, aggregate_type, aggregate_id, payload, correlation_id, causation_id)`
+        self.event_recorder = event_recorder
 
     def create_listing_for_user(self, seller_id, title, description, category, condition, price, currency, location):
         # seller must exist and be ACTIVE
@@ -32,9 +38,28 @@ class MarketplaceService:
         if seller.status.name != "ACTIVE":
             raise MarketplaceWorkflowError("seller must be ACTIVE")
 
-        return self.listing_service.create_listing(
+        listing = self.listing_service.create_listing(
             seller_id, title, description, category, condition, price, currency, location
         )
+        # record event if recorder provided
+        if self.event_recorder is not None:
+            try:
+                self.event_recorder.record(
+                    "commerce.listing.created",
+                    "Listing",
+                    listing.id,
+                    {
+                        "id": str(listing.id),
+                        "seller_id": str(listing.seller_id),
+                        "title": listing.title,
+                        "price": str(listing.price),
+                        "currency": listing.currency,
+                    },
+                )
+            except Exception:
+                # Do not fail the business operation if event recording fails
+                pass
+        return listing
 
     def publish_listing(self, seller_id, listing_id):
         try:
@@ -53,9 +78,21 @@ class MarketplaceService:
             raise MarketplaceWorkflowError("seller does not own listing")
 
         try:
-            return self.listing_service.publish(listing_id)
+            published = self.listing_service.publish(listing_id)
         except Exception as e:
             raise MarketplaceWorkflowError("cannot publish listing") from e
+
+        if self.event_recorder is not None:
+            try:
+                self.event_recorder.record(
+                    "commerce.listing.published",
+                    "Listing",
+                    published.id,
+                    {"id": str(published.id), "seller_id": str(published.seller_id)},
+                )
+            except Exception:
+                pass
+        return published
 
     def create_reservation(self, buyer_id, listing_id):
         # buyer and seller must exist and be ACTIVE
@@ -87,9 +124,22 @@ class MarketplaceService:
             raise MarketplaceWorkflowError("listing must be PUBLISHED to reserve")
 
         try:
-            return self.reservation_service.create_reservation(listing_id, buyer_id, seller_id)
+            reservation = self.reservation_service.create_reservation(listing_id, buyer_id, seller_id)
         except Exception as e:
             raise MarketplaceWorkflowError("cannot create reservation") from e
+
+        if self.event_recorder is not None:
+            try:
+                self.event_recorder.record(
+                    "commerce.reservation.created",
+                    "Reservation",
+                    reservation.id,
+                    {"id": str(reservation.id), "listing_id": str(reservation.listing_id), "buyer_id": str(reservation.buyer_id)},
+                )
+            except Exception:
+                pass
+
+        return reservation
 
     def accept_reservation(self, reservation_id, seller_id):
         # seller must exist and be ACTIVE
@@ -133,5 +183,24 @@ class MarketplaceService:
                 stored.updated_at = datetime.now(UTC)
                 self.reservation_service._store[reservation_id] = stored
             raise MarketplaceWorkflowError("cannot reserve listing; rolled back reservation") from e
+
+        # record events after both operations succeeded
+        if self.event_recorder is not None:
+            try:
+                self.event_recorder.record(
+                    "commerce.reservation.accepted",
+                    "Reservation",
+                    reservation_id,
+                    {"id": str(reservation_id), "listing_id": str(reservation.listing_id)},
+                )
+                self.event_recorder.record(
+                    "commerce.listing.reserved",
+                    "Listing",
+                    reservation.listing_id,
+                    {"id": str(reservation.listing_id), "reserved_by": str(reservation.buyer_id)},
+                )
+            except Exception:
+                # If event recording fails, do not alter already-successful domain changes
+                pass
 
         return self.reservation_service.get_reservation(reservation_id)
