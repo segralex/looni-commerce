@@ -4,7 +4,7 @@ from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
 
-from pydantic import BaseModel, constr
+from pydantic import BaseModel, constr, ConfigDict
 
 
 class ListingCreate(BaseModel):
@@ -34,5 +34,4 @@ class ListingResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
