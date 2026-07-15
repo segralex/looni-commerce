@@ -1,0 +1,21 @@
+"""Application settings resolved from environment variables."""
+from __future__ import annotations
+
+import os
+from pathlib import Path
+
+
+class Settings:
+    """Reads configuration from environment variables with sensible defaults."""
+
+    @property
+    def repository_backend(self) -> str:
+        return os.environ.get("LOONI_REPOSITORY_BACKEND", "memory")
+
+    @property
+    def database_path(self) -> Path:
+        raw = os.environ.get("LOONI_DATABASE_PATH", "data/looni-commerce.db")
+        return Path(raw)
+
+
+settings = Settings()
