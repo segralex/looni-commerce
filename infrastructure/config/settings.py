@@ -26,5 +26,20 @@ class Settings:
         raw = os.environ.get("LOONI_JSON_LOGS", "true").lower()
         return raw not in ("0", "false", "no", "off")
 
+    @property
+    def jwt_secret(self) -> str:
+        return os.environ.get("LOONI_JWT_SECRET", "")
+
+    @property
+    def jwt_algorithm(self) -> str:
+        return os.environ.get("LOONI_JWT_ALGORITHM", "HS256")
+
+    @property
+    def access_token_minutes(self) -> int:
+        try:
+            return int(os.environ.get("LOONI_ACCESS_TOKEN_MINUTES", "30"))
+        except ValueError:
+            return 30
+
 
 settings = Settings()

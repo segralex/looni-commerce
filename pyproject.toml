@@ -2,3 +2,9 @@
 name = "looni-commerce"
 version = "0.1.0"
 requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.100",
+    "pydantic>=2.0",
+    "pwdlib[argon2]",
+    "PyJWT>=2.8.0",
+]

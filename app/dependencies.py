@@ -20,6 +20,7 @@ from infrastructure.sqlite.database import Database
 from infrastructure.sqlite.listing_repository import SQLiteListingRepository
 from infrastructure.sqlite.reservation_repository import SQLiteReservationRepository
 from infrastructure.sqlite.user_repository import SQLiteUserRepository
+from infrastructure.security.credentials import MemoryCredentialRepository
 from kernel.events.store import EventStore
 from kernel.integration.recorder import EventRecorder
 from application.marketplace.service import MarketplaceService
@@ -49,6 +50,7 @@ def _build_repositories() -> tuple[Any, Any, Any]:
 
 
 user_repository, listing_repository, reservation_repository = _build_repositories()
+credential_repository = MemoryCredentialRepository()
 event_store = EventStore()
 event_recorder = EventRecorder(event_store)
 marketplace_service = MarketplaceService(
@@ -66,9 +68,10 @@ def reset_singletons() -> None:
     so that environment-variable overrides take effect between tests.
     """
     global user_repository, listing_repository, reservation_repository
-    global event_store, event_recorder, marketplace_service
+    global credential_repository, event_store, event_recorder, marketplace_service
 
     user_repository, listing_repository, reservation_repository = _build_repositories()
+    credential_repository = MemoryCredentialRepository()
     event_store = EventStore()
     event_recorder = EventRecorder(event_store)
     marketplace_service = MarketplaceService(
@@ -89,6 +92,10 @@ def get_listing_repository() -> Any:
 
 def get_reservation_repository() -> Any:
     return reservation_repository
+
+
+def get_credential_repository() -> MemoryCredentialRepository:
+    return credential_repository
 
 
 def get_event_store() -> EventStore:
