@@ -17,5 +17,14 @@ class Settings:
         raw = os.environ.get("LOONI_DATABASE_PATH", "data/looni-commerce.db")
         return Path(raw)
 
+    @property
+    def log_level(self) -> str:
+        return os.environ.get("LOONI_LOG_LEVEL", "INFO").upper()
+
+    @property
+    def json_logs(self) -> bool:
+        raw = os.environ.get("LOONI_JSON_LOGS", "true").lower()
+        return raw not in ("0", "false", "no", "off")
+
 
 settings = Settings()
