@@ -84,12 +84,7 @@ def test_password_absent_from_response(jwt_secret):
 
 
 def test_duplicate_registration_rejected(jwt_secret):
-    """Credentials (password) can only be stored once per user.
-    
-    Note: Multiple User records can exist with the same email (valid marketplace behavior).
-    But only the first one can have credentials registered.
-    """
-    # Register first user
+    """Exact duplicate email rejected on registration."""
     reg1 = client.post(
         "/auth/register",
         json={
@@ -99,12 +94,88 @@ def test_duplicate_registration_rejected(jwt_secret):
         },
     )
     assert reg1.status_code == 201
-    user_id_1 = reg1.json()["id"]
     
-    # Try to register credentials for the same user again
-    # (This would fail because credentials already exist for that user_id)
-    # But since we create a new User each time, we can't directly test this.
-    # The test is satisfied by verifying we can only have one credential per user.
+    # Try to register same email again
+    reg2 = client.post(
+        "/auth/register",
+        json={
+            "display_name": "Carol2",
+            "email": "carol1@example.com",
+            "password": "AnotherPassword123!",
+        },
+    )
+    assert reg2.status_code == 409
+
+
+def test_case_insensitive_duplicate_rejected(jwt_secret):
+    """Different capitalization of same email rejected."""
+    reg1 = client.post(
+        "/auth/register",
+        json={
+            "display_name": "David",
+            "email": "David@Example.COM",
+            "password": "SecurePassword123!",
+        },
+    )
+    assert reg1.status_code == 201
+    
+    # Try to register same email with different case
+    reg2 = client.post(
+        "/auth/register",
+        json={
+            "display_name": "David2",
+            "email": "david@example.com",
+            "password": "AnotherPassword123!",
+        },
+    )
+    assert reg2.status_code == 409
+
+
+def test_whitespace_normalized_duplicate_rejected(jwt_secret):
+    """Email with surrounding whitespace treated as duplicate."""
+    reg1 = client.post(
+        "/auth/register",
+        json={
+            "display_name": "Eve",
+            "email": "eve@example.com",
+            "password": "SecurePassword123!",
+        },
+    )
+    assert reg1.status_code == 201
+    
+    # Try with leading/trailing whitespace
+    reg2 = client.post(
+        "/auth/register",
+        json={
+            "display_name": "Eve2",
+            "email": "  eve@example.com  ",
+            "password": "AnotherPassword123!",
+        },
+    )
+    assert reg2.status_code == 409
+
+
+def test_different_emails_succeed(jwt_secret):
+    """Different emails can be registered."""
+    reg1 = client.post(
+        "/auth/register",
+        json={
+            "display_name": "Frank",
+            "email": "frank@example.com",
+            "password": "SecurePassword123!",
+        },
+    )
+    assert reg1.status_code == 201
+    
+    reg2 = client.post(
+        "/auth/register",
+        json={
+            "display_name": "Grace",
+            "email": "grace@example.com",
+            "password": "AnotherPassword123!",
+        },
+    )
+    assert reg2.status_code == 201
 
 
 def test_short_password_rejected(jwt_secret):
@@ -211,6 +282,31 @@ def test_invalid_credentials_return_generic_401(jwt_secret):
     )
     assert response.status_code == 401
     assert response.json()["detail"] == "Invalid credentials"
+
+
+def test_login_works_with_different_email_capitalization(jwt_secret):
+    """Login succeeds when using different capitalization of registered email."""
+    client.post(
+        "/auth/register",
+        json={
+            "display_name": "Helen",
+            "email": "Helen@Example.COM",
+            "password": "SecurePassword123!",
+        },
+    )
+    user = deps.marketplace_service.user_repository.all()[0]
+    deps.marketplace_service.activate_user(user.id)
+
+    # Login with different case
+    response = client.post(
+        "/auth/login",
+        json={
+            "email": "helen@example.com",
+            "password": "SecurePassword123!",
+        },
+    )
+    assert response.status_code == 200
+    assert "access_token" in response.json()
 
 
 def test_login_response_contains_no_password(jwt_secret):

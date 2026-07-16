@@ -73,6 +73,13 @@ def register(
             detail=str(e),
         )
 
+    # Check if email already has credentials (before creating user).
+    if cred_repo.get_by_email(req.email):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Email already registered",
+        )
+
     # Create user through marketplace service.
     try:
         user = marketplace_service.create_user(req.display_name, req.email, req.phone)
@@ -82,9 +89,9 @@ def register(
             detail=f"Failed to create user: {e}",
         )
 
-    # Store credentials separately.
+    # Store credentials separately with email.
     try:
-        cred_repo.store(user.id, password_hash)
+        cred_repo.store(user.id, req.email, password_hash)
     except DuplicateCredentialsError as e:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -106,32 +113,31 @@ def login(
     cred_repo=Depends(get_credential_repository),
 ):
     """Authenticate and return JWT access token."""
-    # Lookup user by normalized email.
-    email_lower = req.email.lower().strip()
-
-    # Find user with matching email (case-insensitive).
-    all_users = marketplace_service.user_repository.all() if marketplace_service.user_repository else []
-    user = None
-    for u in all_users:
-        if u.email.lower() == email_lower:
-            user = u
-            break
-
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid credentials",
-        )
-
-    if user.status != UserStatus.ACTIVE:
+    # Lookup credentials by normalized email (deterministic).
+    cred = cred_repo.get_by_email(req.email)
+    if not cred:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid credentials",
         )
 
     # Check password.
-    cred = cred_repo.get(user.id)
-    if not cred or not verify_password(req.password, cred.password_hash):
+    if not verify_password(req.password, cred.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid credentials",
+        )
+
+    # Get user to check status.
+    try:
+        user = marketplace_service.get_user(cred.user_id)
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid credentials",
+        )
+
+    if user.status != UserStatus.ACTIVE:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid credentials",
