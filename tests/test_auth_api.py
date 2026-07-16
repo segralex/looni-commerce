@@ -52,7 +52,7 @@ def jwt_secret(monkeypatch):
 
 def test_register_creates_user_and_credentials(jwt_secret):
     response = client.post(
-        "/auth/register",
+        "/api/v1/auth/register",
         json={
             "display_name": "Alice",
             "email": "alice@example.com",
@@ -71,7 +71,7 @@ def test_register_creates_user_and_credentials(jwt_secret):
 def test_password_absent_from_response(jwt_secret):
     """Verify password is never in any response."""
     response = client.post(
-        "/auth/register",
+        "/api/v1/auth/register",
         json={
             "display_name": "Bob",
             "email": "bob@example.com",
@@ -86,7 +86,7 @@ def test_password_absent_from_response(jwt_secret):
 def test_duplicate_registration_rejected(jwt_secret):
     """Exact duplicate email rejected on registration."""
     reg1 = client.post(
-        "/auth/register",
+        "/api/v1/auth/register",
         json={
             "display_name": "Carol",
             "email": "carol1@example.com",
@@ -97,7 +97,7 @@ def test_duplicate_registration_rejected(jwt_secret):
     
     # Try to register same email again
     reg2 = client.post(
-        "/auth/register",
+        "/api/v1/auth/register",
         json={
             "display_name": "Carol2",
             "email": "carol1@example.com",
@@ -110,7 +110,7 @@ def test_duplicate_registration_rejected(jwt_secret):
 def test_case_insensitive_duplicate_rejected(jwt_secret):
     """Different capitalization of same email rejected."""
     reg1 = client.post(
-        "/auth/register",
+        "/api/v1/auth/register",
         json={
             "display_name": "David",
             "email": "David@Example.COM",
@@ -121,7 +121,7 @@ def test_case_insensitive_duplicate_rejected(jwt_secret):
     
     # Try to register same email with different case
     reg2 = client.post(
-        "/auth/register",
+        "/api/v1/auth/register",
         json={
             "display_name": "David2",
             "email": "david@example.com",
@@ -134,7 +134,7 @@ def test_case_insensitive_duplicate_rejected(jwt_secret):
 def test_whitespace_normalized_duplicate_rejected(jwt_secret):
     """Email with surrounding whitespace treated as duplicate."""
     reg1 = client.post(
-        "/auth/register",
+        "/api/v1/auth/register",
         json={
             "display_name": "Eve",
             "email": "eve@example.com",
@@ -145,7 +145,7 @@ def test_whitespace_normalized_duplicate_rejected(jwt_secret):
     
     # Try with leading/trailing whitespace
     reg2 = client.post(
-        "/auth/register",
+        "/api/v1/auth/register",
         json={
             "display_name": "Eve2",
             "email": "  eve@example.com  ",
@@ -158,7 +158,7 @@ def test_whitespace_normalized_duplicate_rejected(jwt_secret):
 def test_different_emails_succeed(jwt_secret):
     """Different emails can be registered."""
     reg1 = client.post(
-        "/auth/register",
+        "/api/v1/auth/register",
         json={
             "display_name": "Frank",
             "email": "frank@example.com",
@@ -168,7 +168,7 @@ def test_different_emails_succeed(jwt_secret):
     assert reg1.status_code == 201
     
     reg2 = client.post(
-        "/auth/register",
+        "/api/v1/auth/register",
         json={
             "display_name": "Grace",
             "email": "grace@example.com",
@@ -181,7 +181,7 @@ def test_different_emails_succeed(jwt_secret):
 def test_short_password_rejected(jwt_secret):
     """Password < 10 chars rejected at registration."""
     response = client.post(
-        "/auth/register",
+        "/api/v1/auth/register",
         json={
             "display_name": "Dave",
             "email": "dave@example.com",
@@ -199,7 +199,7 @@ def test_short_password_rejected(jwt_secret):
 def test_active_user_can_log_in(jwt_secret):
     """Register, activate, then log in."""
     reg_response = client.post(
-        "/auth/register",
+        "/api/v1/auth/register",
         json={
             "display_name": "Eve",
             "email": "eve@example.com",
@@ -213,7 +213,7 @@ def test_active_user_can_log_in(jwt_secret):
 
     # Now login
     login_response = client.post(
-        "/auth/login",
+        "/api/v1/auth/login",
         json={
             "email": "eve@example.com",
             "password": "SecurePassword123!",
@@ -230,7 +230,7 @@ def test_active_user_can_log_in(jwt_secret):
 def test_inactive_user_cannot_log_in(jwt_secret):
     """User in PENDING status cannot log in."""
     client.post(
-        "/auth/register",
+        "/api/v1/auth/register",
         json={
             "display_name": "Frank",
             "email": "frank@example.com",
@@ -238,7 +238,7 @@ def test_inactive_user_cannot_log_in(jwt_secret):
         },
     )
     response = client.post(
-        "/auth/login",
+        "/api/v1/auth/login",
         json={
             "email": "frank@example.com",
             "password": "SecurePassword123!",
@@ -250,7 +250,7 @@ def test_inactive_user_cannot_log_in(jwt_secret):
 def test_invalid_credentials_return_generic_401(jwt_secret):
     """Wrong password or email returns generic 401."""
     client.post(
-        "/auth/register",
+        "/api/v1/auth/register",
         json={
             "display_name": "Grace",
             "email": "grace@example.com",
@@ -263,7 +263,7 @@ def test_invalid_credentials_return_generic_401(jwt_secret):
 
     # Wrong password
     response = client.post(
-        "/auth/login",
+        "/api/v1/auth/login",
         json={
             "email": "grace@example.com",
             "password": "WrongPassword!",
@@ -274,7 +274,7 @@ def test_invalid_credentials_return_generic_401(jwt_secret):
 
     # Wrong email
     response = client.post(
-        "/auth/login",
+        "/api/v1/auth/login",
         json={
             "email": "nonexistent@example.com",
             "password": "SecurePassword123!",
@@ -287,7 +287,7 @@ def test_invalid_credentials_return_generic_401(jwt_secret):
 def test_login_works_with_different_email_capitalization(jwt_secret):
     """Login succeeds when using different capitalization of registered email."""
     client.post(
-        "/auth/register",
+        "/api/v1/auth/register",
         json={
             "display_name": "Helen",
             "email": "Helen@Example.COM",
@@ -299,7 +299,7 @@ def test_login_works_with_different_email_capitalization(jwt_secret):
 
     # Login with different case
     response = client.post(
-        "/auth/login",
+        "/api/v1/auth/login",
         json={
             "email": "helen@example.com",
             "password": "SecurePassword123!",
@@ -312,7 +312,7 @@ def test_login_works_with_different_email_capitalization(jwt_secret):
 def test_login_response_contains_no_password(jwt_secret):
     """Verify password never appears in login response."""
     client.post(
-        "/auth/register",
+        "/api/v1/auth/register",
         json={
             "display_name": "Henry",
             "email": "henry@example.com",
@@ -323,7 +323,7 @@ def test_login_response_contains_no_password(jwt_secret):
     deps.marketplace_service.activate_user(user.id)
 
     response = client.post(
-        "/auth/login",
+        "/api/v1/auth/login",
         json={
             "email": "henry@example.com",
             "password": "SecurePassword123!",
@@ -342,7 +342,7 @@ def test_login_response_contains_no_password(jwt_secret):
 def test_auth_me_returns_authenticated_user(jwt_secret):
     """GET /auth/me with valid token returns user."""
     reg = client.post(
-        "/auth/register",
+        "/api/v1/auth/register",
         json={
             "display_name": "Iris",
             "email": "iris@example.com",
@@ -353,7 +353,7 @@ def test_auth_me_returns_authenticated_user(jwt_secret):
     deps.marketplace_service.activate_user(UUID(user_id))
 
     login_response = client.post(
-        "/auth/login",
+        "/api/v1/auth/login",
         json={
             "email": "iris@example.com",
             "password": "SecurePassword123!",
@@ -362,7 +362,7 @@ def test_auth_me_returns_authenticated_user(jwt_secret):
     token = login_response.json()["access_token"]
 
     me_response = client.get(
-        "/auth/me",
+        "/api/v1/auth/me",
         headers={"Authorization": f"Bearer {token}"},
     )
     assert me_response.status_code == 200
@@ -373,14 +373,14 @@ def test_auth_me_returns_authenticated_user(jwt_secret):
 
 def test_missing_bearer_token_rejected(jwt_secret):
     """GET /auth/me without Authorization header returns 401."""
-    response = client.get("/auth/me")
+    response = client.get("/api/v1/auth/me")
     assert response.status_code == 401
 
 
 def test_invalid_bearer_token_rejected(jwt_secret):
     """GET /auth/me with invalid token returns 401."""
     response = client.get(
-        "/auth/me",
+        "/api/v1/auth/me",
         headers={"Authorization": "Bearer invalid-token-xyz"},
     )
     assert response.status_code == 401
@@ -389,7 +389,7 @@ def test_invalid_bearer_token_rejected(jwt_secret):
 def test_auth_me_response_has_no_password(jwt_secret):
     """GET /auth/me response never contains password."""
     reg = client.post(
-        "/auth/register",
+        "/api/v1/auth/register",
         json={
             "display_name": "Jack",
             "email": "jack@example.com",
@@ -400,7 +400,7 @@ def test_auth_me_response_has_no_password(jwt_secret):
     deps.marketplace_service.activate_user(UUID(user_id))
 
     login_response = client.post(
-        "/auth/login",
+        "/api/v1/auth/login",
         json={
             "email": "jack@example.com",
             "password": "SecurePassword123!",
@@ -409,7 +409,7 @@ def test_auth_me_response_has_no_password(jwt_secret):
     token = login_response.json()["access_token"]
 
     me_response = client.get(
-        "/auth/me",
+        "/api/v1/auth/me",
         headers={"Authorization": f"Bearer {token}"},
     )
     assert me_response.status_code == 200

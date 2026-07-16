@@ -13,11 +13,13 @@ configure_logging()
 app = FastAPI(title="Looni Commerce")
 app.add_middleware(RequestLoggingMiddleware)
 marketplace_service = get_marketplace_service()
-app.include_router(users_router)
-app.include_router(listings_router)
-app.include_router(search_router)
-app.include_router(reservations_router)
-app.include_router(auth_router)
+
+# Mount all product routers under /api/v1
+app.include_router(users_router, prefix="/api/v1")
+app.include_router(listings_router, prefix="/api/v1")
+app.include_router(search_router, prefix="/api/v1")
+app.include_router(reservations_router, prefix="/api/v1")
+app.include_router(auth_router, prefix="/api/v1")
 
 
 @app.get("/")

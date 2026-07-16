@@ -15,16 +15,16 @@ def test_full_marketplace_flow_and_licos_events():
     client = TestClient(app)
 
     # 1-2 Create and activate seller
-    seller = client.post("/users/", json={"display_name": "Seller", "email": "seller@example.com"}).json()
-    client.post(f"/users/{seller['id']}/activate")
+    seller = client.post("/api/v1/users/", json={"display_name": "Seller", "email": "seller@example.com"}).json()
+    client.post(f"/api/v1/users/{seller['id']}/activate")
 
     # 3-4 Create and activate buyer
-    buyer = client.post("/users/", json={"display_name": "Buyer", "email": "buyer@example.com"}).json()
-    client.post(f"/users/{buyer['id']}/activate")
+    buyer = client.post("/api/v1/users/", json={"display_name": "Buyer", "email": "buyer@example.com"}).json()
+    client.post(f"/api/v1/users/{buyer['id']}/activate")
 
     # 5 Create listing
     listing = client.post(
-        "/listings/",
+        "/api/v1/listings/",
         json={
             "seller_id": seller["id"],
             "title": "Acceptance Item",
@@ -38,31 +38,31 @@ def test_full_marketplace_flow_and_licos_events():
     ).json()
 
     # 6 Publish listing
-    p = client.post(f"/listings/{listing['id']}/publish")
+    p = client.post(f"/api/v1/listings/{listing['id']}/publish")
     assert p.status_code == 200
 
     # 7 Search and verify listing appears
-    s = client.get("/search")
+    s = client.get("/api/v1/search")
     assert s.status_code == 200
     ids = [it["id"] for it in s.json()["items"]]
     assert listing["id"] in ids
 
     # 8 Create reservation
-    r = client.post("/reservations/", json={"buyer_id": buyer['id'], "listing_id": listing['id']})
+    r = client.post("/api/v1/reservations/", json={"buyer_id": buyer['id'], "listing_id": listing['id']})
     assert r.status_code == 201
     reservation = r.json()
 
     # 9 Accept reservation
-    a = client.post(f"/reservations/{reservation['id']}/accept", json={"seller_id": seller['id']})
+    a = client.post(f"/api/v1/reservations/{reservation['id']}/accept", json={"seller_id": seller['id']})
     assert a.status_code == 200
 
     # 10 Retrieve reservation and verify ACCEPTED
-    got = client.get(f"/reservations/{reservation['id']}")
+    got = client.get(f"/api/v1/reservations/{reservation['id']}")
     assert got.status_code == 200
     assert got.json()["status"] == "ACCEPTED"
 
     # 11 Retrieve listing and verify RESERVED
-    l2 = client.get(f"/listings/{listing['id']}")
+    l2 = client.get(f"/api/v1/listings/{listing['id']}")
     assert l2.status_code == 200
     assert l2.json()["status"] == "RESERVED"
 

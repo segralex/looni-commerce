@@ -9,17 +9,17 @@ client = TestClient(app)
 
 def test_create_listing():
     user_response = client.post(
-        "/users/",
+        "/api/v1/users/",
         json={"display_name": "Seller", "email": "seller@example.com"},
     )
     assert user_response.status_code == 201
     seller_id = user_response.json()["id"]
 
-    activate_response = client.post(f"/users/{seller_id}/activate")
+    activate_response = client.post(f"/api/v1/users/{seller_id}/activate")
     assert activate_response.status_code == 200
 
     response = client.post(
-        "/listings/",
+        "/api/v1/listings/",
         json={
             "seller_id": seller_id,
             "title": "Book",
@@ -40,14 +40,14 @@ def test_create_listing():
 
 def test_get_listing():
     user_response = client.post(
-        "/users/",
+        "/api/v1/users/",
         json={"display_name": "Seller2", "email": "seller2@example.com"},
     )
     seller_id = user_response.json()["id"]
-    client.post(f"/users/{seller_id}/activate")
+    client.post(f"/api/v1/users/{seller_id}/activate")
 
     listing_response = client.post(
-        "/listings/",
+        "/api/v1/listings/",
         json={
             "seller_id": seller_id,
             "title": "Gadget",
@@ -61,7 +61,7 @@ def test_get_listing():
     )
     listing_id = listing_response.json()["id"]
 
-    response = client.get(f"/listings/{listing_id}")
+    response = client.get(f"/api/v1/listings/{listing_id}")
     assert response.status_code == 200
     payload = response.json()
     assert payload["id"] == listing_id
@@ -70,14 +70,14 @@ def test_get_listing():
 
 def test_publish_listing():
     user_response = client.post(
-        "/users/",
+        "/api/v1/users/",
         json={"display_name": "Seller3", "email": "seller3@example.com"},
     )
     seller_id = user_response.json()["id"]
-    client.post(f"/users/{seller_id}/activate")
+    client.post(f"/api/v1/users/{seller_id}/activate")
 
     listing_response = client.post(
-        "/listings/",
+        "/api/v1/listings/",
         json={
             "seller_id": seller_id,
             "title": "Device",
@@ -91,7 +91,7 @@ def test_publish_listing():
     )
     listing_id = listing_response.json()["id"]
 
-    response = client.post(f"/listings/{listing_id}/publish")
+    response = client.post(f"/api/v1/listings/{listing_id}/publish")
     assert response.status_code == 200
     payload = response.json()
     assert payload["status"] == "PUBLISHED"
