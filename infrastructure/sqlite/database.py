@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 from typing import Optional
-from .schema import CREATE_USERS, CREATE_LISTINGS, CREATE_RESERVATIONS
+from .schema import CREATE_USERS, CREATE_LISTINGS, CREATE_RESERVATIONS, CREATE_LISTING_IMAGES
 
 
 class Database:
@@ -19,7 +19,7 @@ class Database:
 
     def _init_schema(self) -> None:
         cur = self.conn.cursor()
-        cur.executescript("\n".join([CREATE_USERS, CREATE_LISTINGS, CREATE_RESERVATIONS]))
+        cur.executescript("\n".join([CREATE_USERS, CREATE_LISTINGS, CREATE_RESERVATIONS, CREATE_LISTING_IMAGES]))
         self.conn.commit()
 
     def close(self) -> None:

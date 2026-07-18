@@ -48,3 +48,19 @@ CREATE_RESERVATIONS = (
     );
     """
 )
+
+CREATE_LISTING_IMAGES = (
+    """
+    CREATE TABLE IF NOT EXISTS listing_images (
+        id TEXT PRIMARY KEY,
+        listing_id TEXT NOT NULL,
+        filename TEXT NOT NULL,
+        content_type TEXT NOT NULL,
+        size_bytes INTEGER NOT NULL,
+        position INTEGER NOT NULL,
+        created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_listing_images_listing_id_position
+        ON listing_images (listing_id, position);
+    """
+)

@@ -14,10 +14,12 @@ from pathlib import Path
 from infrastructure.config.settings import settings
 from infrastructure.repositories.memory import (
     MemoryListingRepository,
+    MemoryListingImageRepository,
     MemoryReservationRepository,
     MemoryUserRepository,
 )
 from infrastructure.sqlite.database import Database
+from infrastructure.sqlite.listing_image_repository import SQLiteListingImageRepository
 from infrastructure.sqlite.listing_repository import SQLiteListingRepository
 from infrastructure.sqlite.reservation_repository import SQLiteReservationRepository
 from infrastructure.sqlite.user_repository import SQLiteUserRepository
@@ -27,17 +29,17 @@ from kernel.events.store import EventStore
 from kernel.integration.recorder import EventRecorder
 from application.marketplace.service import MarketplaceService
 from application.media.service import MediaService
-from domain.listings.repositories import MemoryListingImageRepository
 
 
-def _build_repositories() -> tuple[Any, Any, Any]:
-    """Construct and return (user_repo, listing_repo, reservation_repo) based on settings."""
+def _build_repositories() -> tuple[Any, Any, Any, Any]:
+    """Construct and return repositories based on settings."""
     backend = settings.repository_backend
     if backend == "memory":
         return (
             MemoryUserRepository(),
             MemoryListingRepository(),
             MemoryReservationRepository(),
+            MemoryListingImageRepository(),
         )
     if backend == "sqlite":
         db_path = settings.database_path
@@ -47,17 +49,17 @@ def _build_repositories() -> tuple[Any, Any, Any]:
             SQLiteUserRepository(db),
             SQLiteListingRepository(db),
             SQLiteReservationRepository(db),
+            SQLiteListingImageRepository(db),
         )
     raise ValueError(
         f"Unknown repository backend '{backend}'. Supported: 'memory', 'sqlite'."
     )
 
 
-user_repository, listing_repository, reservation_repository = _build_repositories()
+user_repository, listing_repository, reservation_repository, image_repository = _build_repositories()
 credential_repository = MemoryCredentialRepository()
 event_store = EventStore()
 event_recorder = EventRecorder(event_store)
-image_repository = MemoryListingImageRepository()
 storage_provider = LocalStorageProvider(Path(settings.storage_path))
 media_service = MediaService(
     image_repo=image_repository,
@@ -78,15 +80,14 @@ def reset_singletons() -> None:
     Intended for tests only. Rebuilds repositories according to the active backend
     so that environment-variable overrides take effect between tests.
     """
-    global user_repository, listing_repository, reservation_repository
+    global user_repository, listing_repository, reservation_repository, image_repository
     global credential_repository, event_store, event_recorder, marketplace_service
-    global image_repository, storage_provider, media_service
+    global storage_provider, media_service
 
-    user_repository, listing_repository, reservation_repository = _build_repositories()
+    user_repository, listing_repository, reservation_repository, image_repository = _build_repositories()
     credential_repository = MemoryCredentialRepository()
     event_store = EventStore()
     event_recorder = EventRecorder(event_store)
-    image_repository = MemoryListingImageRepository()
     storage_provider = LocalStorageProvider(Path(settings.storage_path))
     media_service = MediaService(
         image_repo=image_repository,
@@ -129,7 +130,7 @@ def get_marketplace_service() -> MarketplaceService:
     return marketplace_service
 
 
-def get_image_repository() -> MemoryListingImageRepository:
+def get_image_repository() -> Any:
     return image_repository
 
 

@@ -16,9 +16,11 @@ import app.dependencies as deps
 from infrastructure.config.settings import settings
 from infrastructure.repositories.memory import (
     MemoryUserRepository,
+    MemoryListingImageRepository,
     MemoryListingRepository,
     MemoryReservationRepository,
 )
+from infrastructure.sqlite.listing_image_repository import SQLiteListingImageRepository
 from infrastructure.sqlite.user_repository import SQLiteUserRepository
 from infrastructure.sqlite.listing_repository import SQLiteListingRepository
 from infrastructure.sqlite.reservation_repository import SQLiteReservationRepository
@@ -87,6 +89,7 @@ def test_default_builds_memory_repos():
     assert isinstance(deps.user_repository, MemoryUserRepository)
     assert isinstance(deps.listing_repository, MemoryListingRepository)
     assert isinstance(deps.reservation_repository, MemoryReservationRepository)
+    assert isinstance(deps.image_repository, MemoryListingImageRepository)
     # Restore to known state.
     deps.reset_singletons()
 
@@ -99,6 +102,7 @@ def test_sqlite_backend_builds_sqlite_repos(monkeypatch, tmp_path):
     assert isinstance(deps.user_repository, SQLiteUserRepository)
     assert isinstance(deps.listing_repository, SQLiteListingRepository)
     assert isinstance(deps.reservation_repository, SQLiteReservationRepository)
+    assert isinstance(deps.image_repository, SQLiteListingImageRepository)
     # Restore default for subsequent tests.
     monkeypatch.delenv(_ENV_BACKEND)
     deps.reset_singletons()
