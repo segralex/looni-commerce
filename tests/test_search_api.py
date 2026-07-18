@@ -14,6 +14,15 @@ def _reset_state():
 client = TestClient(app)
 
 
+def _upload_minimum_images(listing_id: str) -> None:
+    for index in range(2):
+        response = client.post(
+            f"/api/v1/listings/{listing_id}/images",
+            files={"file": (f"photo{index}.jpg", b"jpeg-data", "image/jpeg")},
+        )
+        assert response.status_code == 201
+
+
 def test_empty_search():
     resp = client.get("/api/v1/search")
     assert resp.status_code == 200
@@ -38,6 +47,7 @@ def test_published_listing_found():
     ).json()
 
     # publish so it becomes discoverable
+    _upload_minimum_images(l["id"])
     client.post(f"/api/v1/listings/{l['id']}/publish")
     resp = client.get("/api/v1/search")
     assert resp.status_code == 200
@@ -85,6 +95,7 @@ def test_category_filter():
     ).json()
 
     # publish before searching
+    _upload_minimum_images(l["id"])
     client.post(f"/api/v1/listings/{l['id']}/publish")
     resp = client.get("/api/v1/search", params={"category": "Electronics"})
     assert resp.status_code == 200
@@ -109,6 +120,7 @@ def test_seller_filter():
     ).json()
 
     # publish before searching
+    _upload_minimum_images(l["id"])
     client.post(f"/api/v1/listings/{l['id']}/publish")
     resp = client.get("/api/v1/search", params={"seller_id": u["id"]})
     assert resp.status_code == 200
@@ -134,6 +146,7 @@ def test_text_query_and_combined_filters():
     ).json()
 
     # publish before searching
+    _upload_minimum_images(l["id"])
     client.post(f"/api/v1/listings/{l['id']}/publish")
     resp = client.get("/api/v1/search", params={"q": "special", "category": "Books", "seller_id": u["id"]})
     assert resp.status_code == 200

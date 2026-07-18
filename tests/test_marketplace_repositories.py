@@ -2,6 +2,8 @@ import os
 import sys
 from decimal import Decimal
 from uuid import uuid4
+from datetime import UTC, datetime
+from pathlib import Path
 
 # Ensure licos-core is importable when running tests from looni-commerce
 LICOS_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "200_LICOS", "licos-core"))
@@ -9,25 +11,31 @@ if os.path.isdir(LICOS_ROOT) and LICOS_ROOT not in sys.path:
     sys.path.insert(0, LICOS_ROOT)
 
 import pytest
-from datetime import UTC
 from domain.listings.models import ItemCondition, ListingStatus
 from domain.repositories import EntityNotFoundError
 from domain.reservations.models import ReservationStatus
 from domain.users.models import UserStatus
+from domain.listings.images import ListingImage
 from infrastructure.repositories.memory import (
     MemoryListingRepository,
     MemoryReservationRepository,
     MemoryUserRepository,
+    MemoryListingImageRepository,
 )
+from infrastructure.storage.local import LocalStorageProvider
 from kernel.events.store import EventStore
 from kernel.integration.recorder import EventRecorder
 from application.marketplace.service import MarketplaceService, MarketplaceWorkflowError
+from application.media.service import MediaService
 
 
 def make_marketplace():
     user_repo = MemoryUserRepository()
     listing_repo = MemoryListingRepository()
     reservation_repo = MemoryReservationRepository()
+    image_repo = MemoryListingImageRepository()
+    storage = LocalStorageProvider(Path("data/test_storage"))
+    media_service = MediaService(image_repo=image_repo, storage=storage)
     store = EventStore()
     recorder = EventRecorder(store)
     service = MarketplaceService(
@@ -35,12 +43,13 @@ def make_marketplace():
         listing_repository=listing_repo,
         reservation_repository=reservation_repo,
         event_recorder=recorder,
+        media_service=media_service,
     )
-    return user_repo, listing_repo, reservation_repo, store, recorder, service
+    return user_repo, listing_repo, reservation_repo, image_repo, store, recorder, service, media_service
 
 
 def test_create_and_retrieve_user():
-    user_repo, _, _, _, _, mp = make_marketplace()
+    user_repo, _, _, _, _, _, mp, _ = make_marketplace()
     user = mp.create_user("Alice", "alice@example.com")
 
     saved = user_repo.get(user.id)
@@ -50,7 +59,7 @@ def test_create_and_retrieve_user():
 
 
 def test_activate_persisted_user():
-    user_repo, _, _, _, _, mp = make_marketplace()
+    user_repo, _, _, _, _, _, mp, _ = make_marketplace()
     user = mp.create_user("Alice", "alice@example.com")
     activated = mp.activate_user(user.id)
 
@@ -59,7 +68,7 @@ def test_activate_persisted_user():
 
 
 def test_create_and_retrieve_listing():
-    user_repo, listing_repo, _, _, _, mp = make_marketplace()
+    user_repo, listing_repo, _, _, _, _, mp, _ = make_marketplace()
     seller = mp.create_user("Seller", "seller@example.com")
     mp.activate_user(seller.id)
 
@@ -81,7 +90,7 @@ def test_create_and_retrieve_listing():
 
 
 def test_publish_persisted_listing():
-    _, listing_repo, _, _, _, mp = make_marketplace()
+    _, listing_repo, _, image_repo, _, _, mp, _ = make_marketplace()
     seller = mp.create_user("Seller", "seller@example.com")
     mp.activate_user(seller.id)
     listing = mp.create_listing_for_user(
@@ -95,6 +104,19 @@ def test_publish_persisted_listing():
         "Online",
     )
 
+    # Add 2 images to allow publishing
+    for i in range(2):
+        image = ListingImage(
+            id=uuid4(),
+            listing_id=listing.id,
+            filename=f"test{i}.jpg",
+            content_type="image/jpeg",
+            size_bytes=1000,
+            position=i + 1,
+            created_at=UTC.localize(datetime.utcnow()) if hasattr(UTC, 'localize') else datetime.now(UTC),
+        )
+        image_repo.store(image)
+
     published = mp.publish_listing(seller.id, listing.id)
 
     assert published.status == ListingStatus.PUBLISHED
@@ -102,7 +124,7 @@ def test_publish_persisted_listing():
 
 
 def test_create_and_retrieve_reservation():
-    _, listing_repo, reservation_repo, _, _, mp = make_marketplace()
+    _, listing_repo, reservation_repo, image_repo, _, _, mp, _ = make_marketplace()
     seller = mp.create_user("Seller", "seller@example.com")
     buyer = mp.create_user("Buyer", "buyer@example.com")
     mp.activate_user(seller.id)
@@ -118,6 +140,20 @@ def test_create_and_retrieve_reservation():
         "USD",
         "Online",
     )
+    
+    # Add 2 images to allow publishing
+    for i in range(2):
+        image = ListingImage(
+            id=uuid4(),
+            listing_id=listing.id,
+            filename=f"test{i}.jpg",
+            content_type="image/jpeg",
+            size_bytes=1000,
+            position=i + 1,
+            created_at=UTC.localize(datetime.utcnow()) if hasattr(UTC, 'localize') else datetime.now(UTC),
+        )
+        image_repo.store(image)
+    
     mp.publish_listing(seller.id, listing.id)
 
     reservation = mp.create_reservation(buyer.id, listing.id)
@@ -130,7 +166,7 @@ def test_create_and_retrieve_reservation():
 
 
 def test_accept_updates_both_stored_reservation_and_listing():
-    _, listing_repo, reservation_repo, _, _, mp = make_marketplace()
+    _, listing_repo, reservation_repo, image_repo, _, _, mp, _ = make_marketplace()
     seller = mp.create_user("Seller", "seller@example.com")
     buyer = mp.create_user("Buyer", "buyer@example.com")
     mp.activate_user(seller.id)
@@ -146,6 +182,20 @@ def test_accept_updates_both_stored_reservation_and_listing():
         "USD",
         "Online",
     )
+    
+    # Add 2 images to allow publishing
+    for i in range(2):
+        image = ListingImage(
+            id=uuid4(),
+            listing_id=listing.id,
+            filename=f"test{i}.jpg",
+            content_type="image/jpeg",
+            size_bytes=1000,
+            position=i + 1,
+            created_at=UTC.localize(datetime.utcnow()) if hasattr(UTC, 'localize') else datetime.now(UTC),
+        )
+        image_repo.store(image)
+    
     mp.publish_listing(seller.id, listing.id)
     reservation = mp.create_reservation(buyer.id, listing.id)
 
@@ -156,7 +206,7 @@ def test_accept_updates_both_stored_reservation_and_listing():
 
 
 def test_cancel_reservation_restores_listing_via_service():
-    _, listing_repo, reservation_repo, _, _, mp = make_marketplace()
+    _, listing_repo, reservation_repo, image_repo, _, _, mp, _ = make_marketplace()
     seller = mp.create_user("Seller", "seller@example.com")
     buyer = mp.create_user("Buyer", "buyer@example.com")
     mp.activate_user(seller.id)
@@ -172,6 +222,20 @@ def test_cancel_reservation_restores_listing_via_service():
         "USD",
         "Online",
     )
+    
+    # Add 2 images to allow publishing
+    for i in range(2):
+        image = ListingImage(
+            id=uuid4(),
+            listing_id=listing.id,
+            filename=f"test{i}.jpg",
+            content_type="image/jpeg",
+            size_bytes=1000,
+            position=i + 1,
+            created_at=UTC.localize(datetime.utcnow()) if hasattr(UTC, 'localize') else datetime.now(UTC),
+        )
+        image_repo.store(image)
+    
     mp.publish_listing(seller.id, listing.id)
     reservation = mp.create_reservation(buyer.id, listing.id)
 
@@ -185,7 +249,7 @@ def test_cancel_reservation_restores_listing_via_service():
 
 
 def test_unknown_ids_rejected():
-    user_repo, listing_repo, reservation_repo, _, _, mp = make_marketplace()
+    user_repo, listing_repo, reservation_repo, _, _, _, mp, _ = make_marketplace()
     seller = mp.create_user("Seller", "seller@example.com")
     mp.activate_user(seller.id)
 
@@ -213,7 +277,7 @@ def test_unknown_ids_rejected():
 
 
 def test_failed_workflow_preserves_repository_state():
-    _, listing_repo, reservation_repo, _, _, mp = make_marketplace()
+    _, listing_repo, reservation_repo, image_repo, _, _, mp, _ = make_marketplace()
     seller = mp.create_user("Seller", "seller@example.com")
     buyer = mp.create_user("Buyer", "buyer@example.com")
     mp.activate_user(seller.id)
@@ -229,6 +293,20 @@ def test_failed_workflow_preserves_repository_state():
         "USD",
         "Online",
     )
+    
+    # Add 2 images to allow publishing
+    for i in range(2):
+        image = ListingImage(
+            id=uuid4(),
+            listing_id=listing.id,
+            filename=f"test{i}.jpg",
+            content_type="image/jpeg",
+            size_bytes=1000,
+            position=i + 1,
+            created_at=UTC.localize(datetime.utcnow()) if hasattr(UTC, 'localize') else datetime.now(UTC),
+        )
+        image_repo.store(image)
+    
     mp.publish_listing(seller.id, listing.id)
     reservation = mp.create_reservation(buyer.id, listing.id)
 
@@ -252,6 +330,9 @@ def test_licos_events_still_emitted_in_correct_order():
     user_repo = MemoryUserRepository()
     listing_repo = MemoryListingRepository()
     reservation_repo = MemoryReservationRepository()
+    image_repo = MemoryListingImageRepository()
+    storage = LocalStorageProvider(Path("data/test_storage"))
+    media_service = MediaService(image_repo=image_repo, storage=storage)
     store = EventStore()
     recorder = EventRecorder(store)
     mp = MarketplaceService(
@@ -259,6 +340,7 @@ def test_licos_events_still_emitted_in_correct_order():
         listing_repository=listing_repo,
         reservation_repository=reservation_repo,
         event_recorder=recorder,
+        media_service=media_service,
     )
 
     seller = mp.create_user("Seller", "seller@example.com")
@@ -276,6 +358,20 @@ def test_licos_events_still_emitted_in_correct_order():
         "USD",
         "Online",
     )
+    
+    # Add 2 images to allow publishing
+    for i in range(2):
+        image = ListingImage(
+            id=uuid4(),
+            listing_id=listing.id,
+            filename=f"test{i}.jpg",
+            content_type="image/jpeg",
+            size_bytes=1000,
+            position=i + 1,
+            created_at=UTC.localize(datetime.utcnow()) if hasattr(UTC, 'localize') else datetime.now(UTC),
+        )
+        image_repo.store(image)
+    
     mp.publish_listing(seller.id, listing.id)
     reservation = mp.create_reservation(buyer.id, listing.id)
     mp.accept_reservation(reservation.id, seller.id)
@@ -284,3 +380,191 @@ def test_licos_events_still_emitted_in_correct_order():
     assert "commerce.reservation.accepted" in types
     assert "commerce.listing.reserved" in types
     assert types.index("commerce.reservation.accepted") < types.index("commerce.listing.reserved")
+
+
+def test_publish_listing_fails_with_zero_images():
+    """Verify that publishing fails when listing has no images."""
+    _, listing_repo, _, _, _, _, mp, _ = make_marketplace()
+    seller = mp.create_user("Seller", "seller@example.com")
+    mp.activate_user(seller.id)
+    
+    listing = mp.create_listing_for_user(
+        seller.id,
+        "Book",
+        "A book",
+        "Books",
+        ItemCondition.GOOD,
+        Decimal("12.50"),
+        "USD",
+        "Online",
+    )
+    
+    # Attempt to publish without adding any images
+    with pytest.raises(MarketplaceWorkflowError) as exc_info:
+        mp.publish_listing(seller.id, listing.id)
+    
+    assert "at least 2 images" in str(exc_info.value)
+    
+    # Verify listing state unchanged
+    assert listing_repo.get(listing.id).status == ListingStatus.DRAFT
+
+
+def test_publish_listing_fails_with_one_image():
+    """Verify that publishing fails when listing has only 1 image."""
+    _, listing_repo, _, image_repo, _, _, mp, _ = make_marketplace()
+    seller = mp.create_user("Seller", "seller@example.com")
+    mp.activate_user(seller.id)
+    
+    listing = mp.create_listing_for_user(
+        seller.id,
+        "Book",
+        "A book",
+        "Books",
+        ItemCondition.GOOD,
+        Decimal("12.50"),
+        "USD",
+        "Online",
+    )
+    
+    # Add only 1 image
+    image = ListingImage(
+        id=uuid4(),
+        listing_id=listing.id,
+        filename="test0.jpg",
+        content_type="image/jpeg",
+        size_bytes=1000,
+        position=1,
+        created_at=UTC.localize(datetime.utcnow()) if hasattr(UTC, 'localize') else datetime.now(UTC),
+    )
+    image_repo.store(image)
+    
+    # Attempt to publish with only 1 image
+    with pytest.raises(MarketplaceWorkflowError) as exc_info:
+        mp.publish_listing(seller.id, listing.id)
+    
+    assert "at least 2 images" in str(exc_info.value)
+    
+    # Verify listing state unchanged
+    assert listing_repo.get(listing.id).status == ListingStatus.DRAFT
+
+
+def test_publish_listing_succeeds_with_exactly_two_images():
+    """Verify that publishing succeeds when listing has exactly 2 images."""
+    _, listing_repo, _, image_repo, _, _, mp, _ = make_marketplace()
+    seller = mp.create_user("Seller", "seller@example.com")
+    mp.activate_user(seller.id)
+    
+    listing = mp.create_listing_for_user(
+        seller.id,
+        "Book",
+        "A book",
+        "Books",
+        ItemCondition.GOOD,
+        Decimal("12.50"),
+        "USD",
+        "Online",
+    )
+    
+    # Add exactly 2 images
+    for i in range(2):
+        image = ListingImage(
+            id=uuid4(),
+            listing_id=listing.id,
+            filename=f"test{i}.jpg",
+            content_type="image/jpeg",
+            size_bytes=1000,
+            position=i + 1,
+            created_at=UTC.localize(datetime.utcnow()) if hasattr(UTC, 'localize') else datetime.now(UTC),
+        )
+        image_repo.store(image)
+    
+    # Publish should succeed
+    published = mp.publish_listing(seller.id, listing.id)
+    
+    assert published.status == ListingStatus.PUBLISHED
+    assert listing_repo.get(listing.id).status == ListingStatus.PUBLISHED
+
+
+def test_publish_listing_succeeds_with_ten_images():
+    """Verify that publishing succeeds when listing has 10 images."""
+    _, listing_repo, _, image_repo, _, _, mp, _ = make_marketplace()
+    seller = mp.create_user("Seller", "seller@example.com")
+    mp.activate_user(seller.id)
+    
+    listing = mp.create_listing_for_user(
+        seller.id,
+        "Book",
+        "A book",
+        "Books",
+        ItemCondition.GOOD,
+        Decimal("12.50"),
+        "USD",
+        "Online",
+    )
+    
+    # Add 10 images
+    for i in range(10):
+        image = ListingImage(
+            id=uuid4(),
+            listing_id=listing.id,
+            filename=f"test{i}.jpg",
+            content_type="image/jpeg",
+            size_bytes=1000,
+            position=i + 1,
+            created_at=UTC.localize(datetime.utcnow()) if hasattr(UTC, 'localize') else datetime.now(UTC),
+        )
+        image_repo.store(image)
+    
+    # Publish should succeed
+    published = mp.publish_listing(seller.id, listing.id)
+    
+    assert published.status == ListingStatus.PUBLISHED
+    assert listing_repo.get(listing.id).status == ListingStatus.PUBLISHED
+
+
+def test_failed_publish_does_not_emit_event():
+    """Verify that failed publication due to insufficient images does not emit events."""
+    user_repo = MemoryUserRepository()
+    listing_repo = MemoryListingRepository()
+    reservation_repo = MemoryReservationRepository()
+    image_repo = MemoryListingImageRepository()
+    storage = LocalStorageProvider(Path("data/test_storage"))
+    media_service = MediaService(image_repo=image_repo, storage=storage)
+    store = EventStore()
+    recorder = EventRecorder(store)
+    mp = MarketplaceService(
+        user_repository=user_repo,
+        listing_repository=listing_repo,
+        reservation_repository=reservation_repo,
+        event_recorder=recorder,
+        media_service=media_service,
+    )
+    
+    seller = mp.create_user("Seller", "seller@example.com")
+    mp.activate_user(seller.id)
+    
+    listing = mp.create_listing_for_user(
+        seller.id,
+        "Book",
+        "A book",
+        "Books",
+        ItemCondition.GOOD,
+        Decimal("12.50"),
+        "USD",
+        "Online",
+    )
+    
+    # Get event count before failed publish attempt
+    initial_events = len(store.all_events())
+    
+    # Try to publish without images
+    with pytest.raises(MarketplaceWorkflowError):
+        mp.publish_listing(seller.id, listing.id)
+    
+    # Verify no publish event was emitted
+    final_events = len(store.all_events())
+    assert final_events == initial_events
+    
+    # Verify no commerce.listing.published event exists
+    all_types = [event.event_type for event in store.all_events()]
+    assert "commerce.listing.published" not in all_types

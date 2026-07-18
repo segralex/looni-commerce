@@ -1,0 +1,24 @@
+"""Schemas for image upload and response."""
+from uuid import UUID
+from pydantic import BaseModel, Field
+
+
+class ListingImageResponse(BaseModel):
+    """Response model for listing image metadata."""
+    
+    id: UUID = Field(..., description="Image ID")
+    listing_id: UUID = Field(..., description="Listing ID")
+    position: int = Field(..., description="Position in listing (1-10)")
+    content_type: str = Field(..., description="MIME type (e.g. 'image/jpeg')")
+    size_bytes: int = Field(..., description="File size in bytes")
+    
+    model_config = {"from_attributes": True}
+
+
+class ListingImagesListResponse(BaseModel):
+    """Response for listing all images."""
+    
+    count: int = Field(..., description="Total number of images")
+    items: list[ListingImageResponse] = Field(
+        ..., description="List of image metadata"
+    )

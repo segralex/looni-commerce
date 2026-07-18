@@ -10,6 +10,7 @@ LICOS_ROOT = os.path.abspath(os.path.join(ROOT_DIR, "..", "..", "200_LICOS", "li
 if os.path.isdir(LICOS_ROOT) and LICOS_ROOT not in sys.path:
     sys.path.insert(0, LICOS_ROOT)
 
+from pathlib import Path
 from infrastructure.config.settings import settings
 from infrastructure.repositories.memory import (
     MemoryListingRepository,
@@ -21,9 +22,12 @@ from infrastructure.sqlite.listing_repository import SQLiteListingRepository
 from infrastructure.sqlite.reservation_repository import SQLiteReservationRepository
 from infrastructure.sqlite.user_repository import SQLiteUserRepository
 from infrastructure.security.credentials import MemoryCredentialRepository
+from infrastructure.storage.local import LocalStorageProvider
 from kernel.events.store import EventStore
 from kernel.integration.recorder import EventRecorder
 from application.marketplace.service import MarketplaceService
+from application.media.service import MediaService
+from domain.listings.repositories import MemoryListingImageRepository
 
 
 def _build_repositories() -> tuple[Any, Any, Any]:
@@ -53,11 +57,18 @@ user_repository, listing_repository, reservation_repository = _build_repositorie
 credential_repository = MemoryCredentialRepository()
 event_store = EventStore()
 event_recorder = EventRecorder(event_store)
+image_repository = MemoryListingImageRepository()
+storage_provider = LocalStorageProvider(Path(settings.storage_path))
+media_service = MediaService(
+    image_repo=image_repository,
+    storage=storage_provider,
+)
 marketplace_service = MarketplaceService(
     user_repository=user_repository,
     listing_repository=listing_repository,
     reservation_repository=reservation_repository,
     event_recorder=event_recorder,
+    media_service=media_service,
 )
 
 
@@ -69,16 +80,24 @@ def reset_singletons() -> None:
     """
     global user_repository, listing_repository, reservation_repository
     global credential_repository, event_store, event_recorder, marketplace_service
+    global image_repository, storage_provider, media_service
 
     user_repository, listing_repository, reservation_repository = _build_repositories()
     credential_repository = MemoryCredentialRepository()
     event_store = EventStore()
     event_recorder = EventRecorder(event_store)
+    image_repository = MemoryListingImageRepository()
+    storage_provider = LocalStorageProvider(Path(settings.storage_path))
+    media_service = MediaService(
+        image_repo=image_repository,
+        storage=storage_provider,
+    )
     marketplace_service = MarketplaceService(
         user_repository=user_repository,
         listing_repository=listing_repository,
         reservation_repository=reservation_repository,
         event_recorder=event_recorder,
+        media_service=media_service,
     )
 
 
@@ -108,3 +127,15 @@ def get_event_recorder() -> EventRecorder:
 
 def get_marketplace_service() -> MarketplaceService:
     return marketplace_service
+
+
+def get_image_repository() -> MemoryListingImageRepository:
+    return image_repository
+
+
+def get_storage_provider() -> LocalStorageProvider:
+    return storage_provider
+
+
+def get_media_service() -> MediaService:
+    return media_service

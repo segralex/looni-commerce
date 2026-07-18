@@ -14,6 +14,15 @@ def _reset_state():
 client = TestClient(app)
 
 
+def _upload_minimum_images(listing_id: str) -> None:
+    for index in range(2):
+        response = client.post(
+            f"/api/v1/listings/{listing_id}/images",
+            files={"file": (f"photo{index}.jpg", b"jpeg-data", "image/jpeg")},
+        )
+        assert response.status_code == 201
+
+
 def test_create_and_get_reservation():
     u = client.post("/api/v1/users/", json={"display_name": "B1", "email": "b1@example.com"}).json()
     client.post(f"/api/v1/users/{u['id']}/activate")
@@ -33,6 +42,7 @@ def test_create_and_get_reservation():
             "location": "Online",
         },
     ).json()
+    _upload_minimum_images(l["id"])
     client.post(f"/api/v1/listings/{l['id']}/publish")
 
     r = client.post("/api/v1/reservations/", json={"buyer_id": u["id"], "listing_id": l["id"]})
@@ -62,6 +72,7 @@ def test_accept_reservation_and_listing_reserved():
             "location": "Online",
         },
     ).json()
+    _upload_minimum_images(listing["id"])
     client.post(f"/api/v1/listings/{listing['id']}/publish")
 
     r = client.post("/api/v1/reservations/", json={"buyer_id": buyer['id'], "listing_id": listing['id']}).json()
@@ -92,6 +103,7 @@ def test_cancel_reservation_restores_listing():
             "location": "Online",
         },
     ).json()
+    _upload_minimum_images(listing["id"])
     client.post(f"/api/v1/listings/{listing['id']}/publish")
 
     r = client.post("/api/v1/reservations/", json={"buyer_id": buyer['id'], "listing_id": listing['id']}).json()
@@ -154,6 +166,7 @@ def test_cannot_accept_twice():
             "location": "Online",
         },
     ).json()
+    _upload_minimum_images(listing["id"])
     client.post(f"/api/v1/listings/{listing['id']}/publish")
 
     r = client.post("/api/v1/reservations/", json={"buyer_id": buyer['id'], "listing_id": listing['id']}).json()
@@ -182,6 +195,7 @@ def test_cannot_cancel_accepted_if_domain_forbids():
             "location": "Online",
         },
     ).json()
+    _upload_minimum_images(listing["id"])
     client.post(f"/api/v1/listings/{listing['id']}/publish")
 
     r = client.post("/api/v1/reservations/", json={"buyer_id": buyer['id'], "listing_id": listing['id']}).json()
@@ -209,6 +223,7 @@ def test_licos_events_emitted_on_accept():
             "location": "Online",
         },
     ).json()
+    _upload_minimum_images(listing["id"])
     client.post(f"/api/v1/listings/{listing['id']}/publish")
 
     r = client.post("/api/v1/reservations/", json={"buyer_id": buyer['id'], "listing_id": listing['id']}).json()

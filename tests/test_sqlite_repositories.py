@@ -3,6 +3,8 @@ import sys
 import tempfile
 from decimal import Decimal
 from pathlib import Path
+from uuid import uuid4
+from datetime import UTC, datetime
 
 LICOS_ROOT = Path(__file__).resolve().parents[3] / "200_LICOS" / "licos-core"
 if LICOS_ROOT.is_dir() and str(LICOS_ROOT) not in sys.path:
@@ -16,7 +18,11 @@ from infrastructure.sqlite.reservation_repository import SQLiteReservationReposi
 from kernel.events.store import EventStore
 from kernel.integration.recorder import EventRecorder
 from application.marketplace.service import MarketplaceService
+from application.media.service import MediaService
 from domain.listings.models import ItemCondition
+from domain.listings.images import ListingImage
+from infrastructure.repositories.memory import MemoryListingImageRepository
+from infrastructure.storage.local import LocalStorageProvider
 
 
 def make_sqlite(path):
@@ -36,11 +42,17 @@ def test_sqlite_basic_persistence_and_marketplace_integration(tmp_path):
 
     store = EventStore()
     recorder = EventRecorder(store)
+    image_repo = MemoryListingImageRepository()
+    media_service = MediaService(
+        image_repo=image_repo,
+        storage=LocalStorageProvider(tmp_path / "storage"),
+    )
     mp = MarketplaceService(
         user_repository=user_repo,
         listing_repository=listing_repo,
         reservation_repository=reservation_repo,
         event_recorder=recorder,
+        media_service=media_service,
     )
 
     # create users and listing and reservation via marketplace
@@ -52,6 +64,19 @@ def test_sqlite_basic_persistence_and_marketplace_integration(tmp_path):
     listing = mp.create_listing_for_user(
         seller.id, "Book", "A book", "Books", ItemCondition.GOOD, Decimal("12.50"), "USD", "Online"
     )
+
+    for index in range(2):
+        image_repo.store(
+            ListingImage(
+                id=uuid4(),
+                listing_id=listing.id,
+                filename=f"photo{index}.jpg",
+                content_type="image/jpeg",
+                size_bytes=1000,
+                position=index + 1,
+                created_at=datetime.now(UTC),
+            )
+        )
 
     # publish and reserve
     mp.publish_listing(seller.id, listing.id)

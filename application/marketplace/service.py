@@ -35,6 +35,7 @@ class MarketplaceService:
         user_service: Optional[UserService] = None,
         listing_service: Optional[ListingService] = None,
         reservation_service: Optional[ReservationService] = None,
+        media_service: Optional[Any] = None,
     ) -> None:
         self.user_repository = user_repository
         self.listing_repository = listing_repository
@@ -43,6 +44,7 @@ class MarketplaceService:
         self.listing_service = listing_service or ListingService()
         self.reservation_service = reservation_service or ReservationService()
         self.event_recorder = event_recorder
+        self.media_service = media_service
 
     def _use_repositories(self) -> bool:
         return (
@@ -207,6 +209,12 @@ class MarketplaceService:
             if listing.status != ListingStatus.DRAFT:
                 raise MarketplaceWorkflowError("cannot publish listing")
 
+            # Check minimum image requirement
+            if self.media_service:
+                images = self.media_service.get_listing_images(listing_id)
+                if len(images) < 2:
+                    raise MarketplaceWorkflowError("listing must have at least 2 images to publish")
+
             publish_candidate = deepcopy(listing)
             publish_candidate.status = ListingStatus.PUBLISHED
             publish_candidate.updated_at = datetime.now(UTC)
@@ -227,6 +235,12 @@ class MarketplaceService:
 
             if listing.seller_id != seller_id:
                 raise MarketplaceWorkflowError("seller does not own listing")
+
+            # Check minimum image requirement
+            if self.media_service:
+                images = self.media_service.get_listing_images(listing_id)
+                if len(images) < 2:
+                    raise MarketplaceWorkflowError("listing must have at least 2 images to publish")
 
             try:
                 published = self.listing_service.publish(listing_id)

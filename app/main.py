@@ -6,6 +6,7 @@ from app.dependencies import get_marketplace_service
 from app.middleware.logging import RequestLoggingMiddleware
 from app.routes import listings_router, users_router, search_router, reservations_router
 from app.routes.auth import router as auth_router
+from app.routes.images import router as images_router
 from infrastructure.logging.config import configure_logging
 
 configure_logging()
@@ -20,6 +21,7 @@ app.include_router(listings_router, prefix="/api/v1")
 app.include_router(search_router, prefix="/api/v1")
 app.include_router(reservations_router, prefix="/api/v1")
 app.include_router(auth_router, prefix="/api/v1")
+app.include_router(images_router, prefix="/api/v1")
 
 
 @app.get("/")

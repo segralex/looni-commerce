@@ -18,6 +18,11 @@ class Settings:
         return Path(raw)
 
     @property
+    def storage_path(self) -> Path:
+        raw = os.environ.get("LOONI_STORAGE_PATH", "data/storage")
+        return Path(raw)
+
+    @property
     def log_level(self) -> str:
         return os.environ.get("LOONI_LOG_LEVEL", "INFO").upper()
 

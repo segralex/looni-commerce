@@ -14,6 +14,14 @@ def _reset_state():
 def test_full_marketplace_flow_and_licos_events():
     client = TestClient(app)
 
+    def upload_minimum_images(listing_id: str) -> None:
+        for index in range(2):
+            response = client.post(
+                f"/api/v1/listings/{listing_id}/images",
+                files={"file": (f"photo{index}.jpg", b"jpeg-data", "image/jpeg")},
+            )
+            assert response.status_code == 201
+
     # 1-2 Create and activate seller
     seller = client.post("/api/v1/users/", json={"display_name": "Seller", "email": "seller@example.com"}).json()
     client.post(f"/api/v1/users/{seller['id']}/activate")
@@ -38,6 +46,7 @@ def test_full_marketplace_flow_and_licos_events():
     ).json()
 
     # 6 Publish listing
+    upload_minimum_images(listing["id"])
     p = client.post(f"/api/v1/listings/{listing['id']}/publish")
     assert p.status_code == 200
 
