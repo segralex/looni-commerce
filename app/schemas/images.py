@@ -11,6 +11,7 @@ class ListingImageResponse(BaseModel):
     position: int = Field(..., description="Position in listing (1-10)")
     content_type: str = Field(..., description="MIME type (e.g. 'image/jpeg')")
     size_bytes: int = Field(..., description="File size in bytes")
+    thumbnails: dict[str, str | None] = Field(..., description="Thumbnail storage identifiers by size")
     
     model_config = {"from_attributes": True}
 

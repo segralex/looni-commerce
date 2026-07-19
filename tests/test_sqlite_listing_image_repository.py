@@ -37,6 +37,29 @@ def test_sqlite_listing_image_repository_returns_sorted_images(tmp_path):
     assert [repo.get_storage_key(image.id) for image in ordered] == ["a.jpg", "b.jpg"]
 
 
+def test_sqlite_listing_image_repository_persists_thumbnail_keys(tmp_path):
+    repo = SQLiteListingImageRepository(Database(str(tmp_path / "thumbs.db")))
+    listing_id = uuid4()
+    image = _make_image(listing_id, 1)
+
+    repo.store(
+        image,
+        storage_key="original.jpg",
+        thumbnail_small_key="small.jpg",
+        thumbnail_medium_key="medium.jpg",
+        thumbnail_large_key="large.jpg",
+    )
+
+    hydrated = repo.get_by_id(image.id)
+    assert hydrated is not None
+    assert hydrated.thumbnail_small == "small.jpg"
+    assert hydrated.thumbnail_medium == "medium.jpg"
+    assert hydrated.thumbnail_large == "large.jpg"
+    assert repo.get_thumbnail_key(image.id, "small") == "small.jpg"
+    assert repo.get_thumbnail_key(image.id, "medium") == "medium.jpg"
+    assert repo.get_thumbnail_key(image.id, "large") == "large.jpg"
+
+
 def test_sqlite_listing_image_repository_reorder_persists_after_recreation(tmp_path):
     db_path = tmp_path / "persist-images.db"
     listing_id = uuid4()
@@ -235,3 +258,40 @@ def test_sqlite_listing_image_schema_migrates_missing_position_column(tmp_path):
     repo = SQLiteListingImageRepository(Database(str(db_path)))
     images = repo.get_by_listing(UUID(listing_id))
     assert [image.position for image in images] == [1, 2]
+
+
+def test_sqlite_listing_image_schema_migrates_thumbnail_columns(tmp_path):
+    db_path = tmp_path / "legacy-thumbs.db"
+    conn = Database(str(db_path)).connect()
+    conn.execute("DROP TABLE IF EXISTS listing_images")
+    conn.execute(
+        """
+        CREATE TABLE listing_images (
+            id TEXT PRIMARY KEY,
+            listing_id TEXT NOT NULL,
+            filename TEXT NOT NULL,
+            content_type TEXT NOT NULL,
+            size_bytes INTEGER NOT NULL,
+            position INTEGER,
+            storage_key TEXT,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    repo = SQLiteListingImageRepository(Database(str(db_path)))
+    listing_id = uuid4()
+    image = _make_image(listing_id, 1)
+    repo.store(
+        image,
+        storage_key="original.jpg",
+        thumbnail_small_key="small.jpg",
+        thumbnail_medium_key="medium.jpg",
+        thumbnail_large_key="large.jpg",
+    )
+
+    assert repo.get_thumbnail_key(image.id, "small") == "small.jpg"
+    assert repo.get_thumbnail_key(image.id, "medium") == "medium.jpg"
+    assert repo.get_thumbnail_key(image.id, "large") == "large.jpg"

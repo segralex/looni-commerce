@@ -27,6 +27,9 @@ class ListingImage:
     size_bytes: int
     position: int
     created_at: datetime
+    thumbnail_small: str | None = None
+    thumbnail_medium: str | None = None
+    thumbnail_large: str | None = None
     
     def __post_init__(self):
         """Validate constraints after initialization."""
@@ -56,3 +59,12 @@ class ListingImage:
             "image/gif",
         }
         return self.content_type in supported_types
+
+    @property
+    def thumbnails(self) -> dict[str, str | None]:
+        """Return thumbnail identifiers grouped by size."""
+        return {
+            "small": self.thumbnail_small,
+            "medium": self.thumbnail_medium,
+            "large": self.thumbnail_large,
+        }

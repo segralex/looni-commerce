@@ -5,6 +5,7 @@ import pytest
 from app.main import app
 from app.dependencies import reset_singletons
 from domain.listings.models import ItemCondition
+from tests.conftest import make_jpeg_bytes
 
 client = TestClient(app)
 
@@ -48,9 +49,15 @@ def _upload_images(listing_id: str, count: int) -> None:
     for index in range(count):
         response = client.post(
             f"/api/v1/listings/{listing_id}/images",
-            files={"file": (f"photo{index}.jpg", b"jpeg-data", "image/jpeg")},
+            files={
+                "file": (
+                    f"photo{index}.jpg",
+                    make_jpeg_bytes(),
+                    "image/jpeg",
+                )
+            },
         )
-        assert response.status_code == 201
+        assert response.status_code == 201, response.text
 
 
 def test_create_listing():

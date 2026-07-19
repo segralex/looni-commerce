@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 import app.dependencies as deps
 from app.main import app
 from infrastructure.sqlite.database import Database
+from tests.conftest import make_jpeg_bytes
 
 
 @pytest.fixture
@@ -52,7 +53,7 @@ def _upload_min_images(client: TestClient, listing_id: str):
     for i in range(2):
         r = client.post(
             f"/api/v1/listings/{listing_id}/images",
-            files={"file": (f"p{i}.jpg", b"jpeg-data", "image/jpeg")},
+            files={"file": (f"p{i}.jpg", make_jpeg_bytes(), "image/jpeg")},
         )
         assert r.status_code == 201
 

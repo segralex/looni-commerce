@@ -25,11 +25,13 @@ from infrastructure.sqlite.reservation_repository import SQLiteReservationReposi
 from infrastructure.sqlite.search_repository import SQLiteSearchRepository
 from infrastructure.sqlite.user_repository import SQLiteUserRepository
 from infrastructure.security.credentials import MemoryCredentialRepository
+from infrastructure.media.pillow_processor import PillowImageProcessor
 from infrastructure.storage.local import LocalStorageProvider
 from kernel.events.store import EventStore
 from kernel.integration.recorder import EventRecorder
 from application.marketplace.service import MarketplaceService
 from application.media.service import MediaService
+from application.media.thumbnail_service import ThumbnailService
 
 
 def _build_repositories() -> tuple[Any, Any, Any, Any]:
@@ -62,10 +64,12 @@ credential_repository = MemoryCredentialRepository()
 event_store = EventStore()
 event_recorder = EventRecorder(event_store)
 storage_provider = LocalStorageProvider(Path(settings.storage_path))
+thumbnail_service = ThumbnailService(PillowImageProcessor(), storage_provider)
 media_service = MediaService(
     image_repo=image_repository,
     storage=storage_provider,
     listing_lookup=listing_repository.get,
+    thumbnail_service=thumbnail_service,
 )
 marketplace_service = MarketplaceService(
     user_repository=user_repository,
@@ -89,16 +93,19 @@ def reset_singletons() -> None:
     global user_repository, listing_repository, reservation_repository, image_repository
     global credential_repository, event_store, event_recorder, marketplace_service, search_repository
     global storage_provider, media_service
+    global thumbnail_service
 
     user_repository, listing_repository, reservation_repository, image_repository = _build_repositories()
     credential_repository = MemoryCredentialRepository()
     event_store = EventStore()
     event_recorder = EventRecorder(event_store)
     storage_provider = LocalStorageProvider(Path(settings.storage_path))
+    thumbnail_service = ThumbnailService(PillowImageProcessor(), storage_provider)
     media_service = MediaService(
         image_repo=image_repository,
         storage=storage_provider,
         listing_lookup=listing_repository.get,
+        thumbnail_service=thumbnail_service,
     )
     marketplace_service = MarketplaceService(
         user_repository=user_repository,

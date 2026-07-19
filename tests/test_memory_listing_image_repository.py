@@ -48,6 +48,25 @@ def test_memory_repository_reorder_persists_for_repository_lifetime():
     assert [repo.get_storage_key(image.id) for image in reordered] == ["three.jpg", "one.jpg", "two.jpg"]
 
 
+def test_memory_repository_persists_thumbnail_keys():
+    repo = MemoryListingImageRepository()
+    listing_id = uuid4()
+    image = _make_image(listing_id, 1)
+
+    repo.store(
+        image,
+        storage_key="original.jpg",
+        thumbnail_small_key="small.jpg",
+        thumbnail_medium_key="medium.jpg",
+        thumbnail_large_key="large.jpg",
+    )
+
+    assert repo.get_storage_key(image.id) == "original.jpg"
+    assert repo.get_thumbnail_key(image.id, "small") == "small.jpg"
+    assert repo.get_thumbnail_key(image.id, "medium") == "medium.jpg"
+    assert repo.get_thumbnail_key(image.id, "large") == "large.jpg"
+
+
 def test_memory_repository_delete_compacts_positions():
     repo = MemoryListingImageRepository()
     listing_id = uuid4()

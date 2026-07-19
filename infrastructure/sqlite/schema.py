@@ -59,6 +59,9 @@ CREATE_LISTING_IMAGES = (
         size_bytes INTEGER NOT NULL,
         position INTEGER,
         storage_key TEXT,
+        thumbnail_small_key TEXT,
+        thumbnail_medium_key TEXT,
+        thumbnail_large_key TEXT,
         created_at TEXT NOT NULL
     );
     """

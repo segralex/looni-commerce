@@ -23,6 +23,9 @@ class SQLiteListingImageRepository(ListingImageRepository):
             size_bytes=int(row["size_bytes"]),
             position=int(row["position"]),
             created_at=datetime.fromisoformat(row["created_at"]),
+            thumbnail_small=row["thumbnail_small_key"],
+            thumbnail_medium=row["thumbnail_medium_key"],
+            thumbnail_large=row["thumbnail_large_key"],
         )
 
     def _get_listing_rows(self, conn, listing_id: UUID):
@@ -41,14 +44,33 @@ class SQLiteListingImageRepository(ListingImageRepository):
                 (index, row["id"]),
             )
 
-    def store(self, image: ListingImage, storage_key: str | None = None) -> None:
+    def store(
+        self,
+        image: ListingImage,
+        storage_key: str | None = None,
+        thumbnail_small_key: str | None = None,
+        thumbnail_medium_key: str | None = None,
+        thumbnail_large_key: str | None = None,
+    ) -> None:
         conn = self.db.connect()
         cur = conn.cursor()
         cur.execute(
             """
             INSERT INTO listing_images
-            (id, listing_id, filename, content_type, size_bytes, position, storage_key, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            (
+                id,
+                listing_id,
+                filename,
+                content_type,
+                size_bytes,
+                position,
+                storage_key,
+                thumbnail_small_key,
+                thumbnail_medium_key,
+                thumbnail_large_key,
+                created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 str(image.id),
@@ -58,6 +80,9 @@ class SQLiteListingImageRepository(ListingImageRepository):
                 image.size_bytes,
                 image.position,
                 storage_key,
+                thumbnail_small_key,
+                thumbnail_medium_key,
+                thumbnail_large_key,
                 image.created_at.isoformat(),
             ),
         )
@@ -90,6 +115,23 @@ class SQLiteListingImageRepository(ListingImageRepository):
         if row is None:
             return None
         return row["storage_key"]
+
+    def get_thumbnail_key(self, image_id: UUID, size: str) -> str | None:
+        column = {
+            "small": "thumbnail_small_key",
+            "medium": "thumbnail_medium_key",
+            "large": "thumbnail_large_key",
+        }.get(size)
+        if column is None:
+            raise ValueError("thumbnail size must be one of: small, medium, large")
+
+        conn = self.db.connect()
+        cur = conn.cursor()
+        cur.execute(f"SELECT {column} FROM listing_images WHERE id = ?", (str(image_id),))
+        row = cur.fetchone()
+        if row is None:
+            return None
+        return row[column]
 
     def delete_by_id(self, image_id: UUID) -> bool:
         conn = self.db.connect()

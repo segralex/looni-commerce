@@ -54,6 +54,15 @@ class Database:
         if "storage_key" not in columns:
             cur.execute("ALTER TABLE listing_images ADD COLUMN storage_key TEXT")
 
+        if "thumbnail_small_key" not in columns:
+            cur.execute("ALTER TABLE listing_images ADD COLUMN thumbnail_small_key TEXT")
+
+        if "thumbnail_medium_key" not in columns:
+            cur.execute("ALTER TABLE listing_images ADD COLUMN thumbnail_medium_key TEXT")
+
+        if "thumbnail_large_key" not in columns:
+            cur.execute("ALTER TABLE listing_images ADD COLUMN thumbnail_large_key TEXT")
+
         self._normalize_listing_image_positions(cur)
         cur.execute("CREATE INDEX IF NOT EXISTS idx_listing_images_listing_id ON listing_images (listing_id)")
         cur.execute(

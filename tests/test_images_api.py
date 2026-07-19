@@ -1,7 +1,9 @@
 """Tests for image upload API."""
+from io import BytesIO
 from uuid import uuid4
 import pytest
 from fastapi.testclient import TestClient
+from PIL import Image
 from app.main import app
 from app.dependencies import reset_singletons
 from infrastructure.security.tokens import create_access_token
@@ -59,12 +61,18 @@ class TestImageUploadAPI:
     def _auth_headers(self, user_id):
         return {"Authorization": f"Bearer {create_access_token(user_id)}"}
 
+    def _image_bytes(self, image_format: str) -> bytes:
+        image = Image.new("RGB", (24, 16), (12, 120, 200))
+        buf = BytesIO()
+        image.save(buf, format=image_format)
+        return buf.getvalue()
+
     def _upload_three_images(self, client, listing_id):
         image_ids = []
         for i in range(3):
             response = client.post(
                 f"/api/v1/listings/{listing_id}/images",
-                files={"file": (f"photo{i}.jpg", f"data-{i}".encode(), "image/jpeg")},
+                files={"file": (f"photo{i}.jpg", self._image_bytes("JPEG"), "image/jpeg")},
             )
             assert response.status_code == 201
             image_ids.append(response.json()["id"])
@@ -76,7 +84,7 @@ class TestImageUploadAPI:
         user_id, listing_id = _create_user_and_listing(client)
         
         # Upload image
-        image_data = b"\xff\xd8\xff\xe0\x00\x10JFIF"  # JPEG header
+        image_data = self._image_bytes("JPEG")
         response = client.post(
             f"/api/v1/listings/{listing_id}/images",
             files={"file": ("photo.jpg", image_data, "image/jpeg")},
@@ -89,6 +97,8 @@ class TestImageUploadAPI:
         assert data["content_type"] == "image/jpeg"
         assert data["size_bytes"] == len(image_data)
         assert "id" in data
+        assert sorted(data["thumbnails"].keys()) == ["large", "medium", "small"]
+        assert all(data["thumbnails"][size] for size in ["small", "medium", "large"])
     
     def test_upload_multiple_images_increment_position(self):
         """Test that multiple uploads increment position."""
@@ -96,7 +106,7 @@ class TestImageUploadAPI:
         user_id, listing_id = _create_user_and_listing(client)
         
         # Upload first image
-        image_data = b"jpeg_data_1"
+        image_data = self._image_bytes("JPEG")
         response1 = client.post(
             f"/api/v1/listings/{listing_id}/images",
             files={"file": ("photo1.jpg", image_data, "image/jpeg")},
@@ -105,7 +115,7 @@ class TestImageUploadAPI:
         assert response1.json()["position"] == 1
         
         # Upload second image
-        image_data = b"jpeg_data_2"
+        image_data = self._image_bytes("JPEG")
         response2 = client.post(
             f"/api/v1/listings/{listing_id}/images",
             files={"file": ("photo2.jpg", image_data, "image/jpeg")},
@@ -118,7 +128,7 @@ class TestImageUploadAPI:
         client = TestClient(app)
         user_id, listing_id = _create_user_and_listing(client)
         
-        png_data = b"\x89PNG\r\n\x1a\n"
+        png_data = self._image_bytes("PNG")
         response = client.post(
             f"/api/v1/listings/{listing_id}/images",
             files={"file": ("image.png", png_data, "image/png")},
@@ -132,7 +142,7 @@ class TestImageUploadAPI:
         client = TestClient(app)
         user_id, listing_id = _create_user_and_listing(client)
         
-        webp_data = b"RIFF\x00\x00\x00\x00WEBP"
+        webp_data = self._image_bytes("WEBP")
         response = client.post(
             f"/api/v1/listings/{listing_id}/images",
             files={"file": ("image.webp", webp_data, "image/webp")},
@@ -146,7 +156,7 @@ class TestImageUploadAPI:
         client = TestClient(app)
         user_id, listing_id = _create_user_and_listing(client)
         
-        gif_data = b"GIF89a"
+        gif_data = self._image_bytes("GIF")
         response = client.post(
             f"/api/v1/listings/{listing_id}/images",
             files={"file": ("image.gif", gif_data, "image/gif")},
@@ -190,14 +200,14 @@ class TestImageUploadAPI:
         for i in range(10):
             response = client.post(
                 f"/api/v1/listings/{listing_id}/images",
-                files={"file": (f"photo{i}.jpg", b"data", "image/jpeg")},
+                files={"file": (f"photo{i}.jpg", self._image_bytes("JPEG"), "image/jpeg")},
             )
             assert response.status_code == 201
         
         # 11th upload should fail
         response = client.post(
             f"/api/v1/listings/{listing_id}/images",
-            files={"file": ("photo11.jpg", b"data", "image/jpeg")},
+            files={"file": ("photo11.jpg", self._image_bytes("JPEG"), "image/jpeg")},
         )
         assert response.status_code == 409
         assert "maximum" in response.json()["detail"].lower()
@@ -211,7 +221,7 @@ class TestImageUploadAPI:
         for i in range(2):
             client.post(
                 f"/api/v1/listings/{listing_id}/images",
-                files={"file": (f"photo{i}.jpg", b"data", "image/jpeg")},
+                files={"file": (f"photo{i}.jpg", self._image_bytes("JPEG"), "image/jpeg")},
             )
         
         # List images
@@ -229,6 +239,7 @@ class TestImageUploadAPI:
         assert first_image["position"] == 1
         assert first_image["content_type"] == "image/jpeg"
         assert "size_bytes" in first_image
+        assert sorted(first_image["thumbnails"].keys()) == ["large", "medium", "small"]
         
         # Check second image
         second_image = data["items"][1]

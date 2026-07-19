@@ -3,6 +3,7 @@ import pytest
 
 from app.main import app
 from app.dependencies import reset_singletons, get_event_store
+from tests.conftest import make_jpeg_bytes
 
 
 @pytest.fixture(autouse=True)
@@ -18,7 +19,7 @@ def test_full_marketplace_flow_and_licos_events():
         for index in range(2):
             response = client.post(
                 f"/api/v1/listings/{listing_id}/images",
-                files={"file": (f"photo{index}.jpg", b"jpeg-data", "image/jpeg")},
+                files={"file": (f"photo{index}.jpg", make_jpeg_bytes(), "image/jpeg")},
             )
             assert response.status_code == 201
 

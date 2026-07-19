@@ -92,6 +92,9 @@ class MemoryListingImageRepository(ListingImageRepository):
     def __init__(self) -> None:
         self._store: dict[UUID, ListingImage] = {}
         self._storage_keys: dict[UUID, str | None] = {}
+        self._thumbnail_small_keys: dict[UUID, str | None] = {}
+        self._thumbnail_medium_keys: dict[UUID, str | None] = {}
+        self._thumbnail_large_keys: dict[UUID, str | None] = {}
 
     def _ordered_images(self, listing_id: UUID) -> list[ListingImage]:
         images = [image for image in self._store.values() if image.listing_id == listing_id]
@@ -106,7 +109,14 @@ class MemoryListingImageRepository(ListingImageRepository):
             compacted.append(normalized)
         return compacted
     
-    def store(self, image: ListingImage, storage_key: str | None = None) -> None:
+    def store(
+        self,
+        image: ListingImage,
+        storage_key: str | None = None,
+        thumbnail_small_key: str | None = None,
+        thumbnail_medium_key: str | None = None,
+        thumbnail_large_key: str | None = None,
+    ) -> None:
         """Store a listing image.
         
         Args:
@@ -115,6 +125,12 @@ class MemoryListingImageRepository(ListingImageRepository):
         self._store[image.id] = image
         if storage_key is not None or image.id not in self._storage_keys:
             self._storage_keys[image.id] = storage_key
+        if thumbnail_small_key is not None or image.id not in self._thumbnail_small_keys:
+            self._thumbnail_small_keys[image.id] = thumbnail_small_key
+        if thumbnail_medium_key is not None or image.id not in self._thumbnail_medium_keys:
+            self._thumbnail_medium_keys[image.id] = thumbnail_medium_key
+        if thumbnail_large_key is not None or image.id not in self._thumbnail_large_keys:
+            self._thumbnail_large_keys[image.id] = thumbnail_large_key
         self._compact_listing(image.listing_id)
     
     def get_by_id(self, image_id: UUID) -> ListingImage | None:
@@ -142,6 +158,15 @@ class MemoryListingImageRepository(ListingImageRepository):
     def get_storage_key(self, image_id: UUID) -> str | None:
         """Get stored storage key for an image."""
         return self._storage_keys.get(image_id)
+
+    def get_thumbnail_key(self, image_id: UUID, size: str) -> str | None:
+        if size == "small":
+            return self._thumbnail_small_keys.get(image_id)
+        if size == "medium":
+            return self._thumbnail_medium_keys.get(image_id)
+        if size == "large":
+            return self._thumbnail_large_keys.get(image_id)
+        raise ValueError("thumbnail size must be one of: small, medium, large")
     
     def delete_by_id(self, image_id: UUID) -> bool:
         """Delete image by ID.
@@ -157,6 +182,9 @@ class MemoryListingImageRepository(ListingImageRepository):
 
         image = self._store.pop(image_id)
         self._storage_keys.pop(image_id, None)
+        self._thumbnail_small_keys.pop(image_id, None)
+        self._thumbnail_medium_keys.pop(image_id, None)
+        self._thumbnail_large_keys.pop(image_id, None)
         self._compact_listing(image.listing_id)
 
         return True
