@@ -14,6 +14,43 @@ class SQLiteListingRepository(ListingRepository):
     def __init__(self, db: Database):
         self.db = db
 
+    def _sync_search_index(self, conn, listing: Listing) -> None:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM listing_search_fts WHERE listing_id = ?", (str(listing.id),))
+        if listing.status != ListingStatus.PUBLISHED:
+            return
+
+        cur.execute(
+            """
+            INSERT INTO listing_search_fts (
+                listing_id,
+                seller_id,
+                status,
+                category,
+                condition,
+                location,
+                price,
+                currency,
+                title,
+                description,
+                created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                str(listing.id),
+                str(listing.seller_id),
+                listing.status.value,
+                listing.category,
+                listing.condition.value,
+                listing.location,
+                str(listing.price),
+                listing.currency,
+                listing.title,
+                listing.description,
+                listing.created_at.isoformat(),
+            ),
+        )
+
     def add(self, entity: Any) -> None:
         conn = self.db.connect()
         cur = conn.cursor()
@@ -35,6 +72,7 @@ class SQLiteListingRepository(ListingRepository):
                     entity.updated_at.isoformat(),
                 ),
             )
+            self._sync_search_index(conn, entity)
             conn.commit()
         except Exception as exc:
             raise DuplicateEntityError("Duplicate entity id") from exc
@@ -84,6 +122,7 @@ class SQLiteListingRepository(ListingRepository):
                 str(entity.id),
             ),
         )
+        self._sync_search_index(conn, entity)
         conn.commit()
 
     def all(self) -> tuple[Any, ...]:

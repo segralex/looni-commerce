@@ -22,3 +22,9 @@ class ListingImagesListResponse(BaseModel):
     items: list[ListingImageResponse] = Field(
         ..., description="List of image metadata"
     )
+
+
+class ListingImageOrderRequest(BaseModel):
+    """Request payload for image reordering."""
+
+    image_ids: list[UUID] = Field(..., description="Complete ordered set of image IDs")

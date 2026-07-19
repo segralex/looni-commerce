@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from collections.abc import Mapping
 from typing import Any
 from uuid import UUID
@@ -90,22 +91,31 @@ class MemoryListingImageRepository(ListingImageRepository):
     
     def __init__(self) -> None:
         self._store: dict[UUID, ListingImage] = {}
-        self._by_listing: dict[UUID, list[ListingImage]] = {}
+        self._storage_keys: dict[UUID, str | None] = {}
+
+    def _ordered_images(self, listing_id: UUID) -> list[ListingImage]:
+        images = [image for image in self._store.values() if image.listing_id == listing_id]
+        return sorted(images, key=lambda image: (image.position, image.created_at, str(image.id)))
+
+    def _compact_listing(self, listing_id: UUID) -> list[ListingImage]:
+        ordered = self._ordered_images(listing_id)
+        compacted: list[ListingImage] = []
+        for index, image in enumerate(ordered, start=1):
+            normalized = replace(image, position=index)
+            self._store[image.id] = normalized
+            compacted.append(normalized)
+        return compacted
     
-    def store(self, image: ListingImage) -> None:
+    def store(self, image: ListingImage, storage_key: str | None = None) -> None:
         """Store a listing image.
         
         Args:
             image: ListingImage entity to store
         """
         self._store[image.id] = image
-        
-        if image.listing_id not in self._by_listing:
-            self._by_listing[image.listing_id] = []
-        
-        # Add to listing and keep sorted by position
-        self._by_listing[image.listing_id].append(image)
-        self._by_listing[image.listing_id].sort(key=lambda x: x.position)
+        if storage_key is not None or image.id not in self._storage_keys:
+            self._storage_keys[image.id] = storage_key
+        self._compact_listing(image.listing_id)
     
     def get_by_id(self, image_id: UUID) -> ListingImage | None:
         """Get image by ID.
@@ -127,7 +137,11 @@ class MemoryListingImageRepository(ListingImageRepository):
         Returns:
             List of ListingImage entities (ordered by position)
         """
-        return self._by_listing.get(listing_id, [])
+        return self._ordered_images(listing_id)
+
+    def get_storage_key(self, image_id: UUID) -> str | None:
+        """Get stored storage key for an image."""
+        return self._storage_keys.get(image_id)
     
     def delete_by_id(self, image_id: UUID) -> bool:
         """Delete image by ID.
@@ -140,18 +154,36 @@ class MemoryListingImageRepository(ListingImageRepository):
         """
         if image_id not in self._store:
             return False
-        
+
         image = self._store.pop(image_id)
-        
-        if image.listing_id in self._by_listing:
-            self._by_listing[image.listing_id] = [
-                img for img in self._by_listing[image.listing_id]
-                if img.id != image_id
-            ]
-            if not self._by_listing[image.listing_id]:
-                del self._by_listing[image.listing_id]
-        
+        self._storage_keys.pop(image_id, None)
+        self._compact_listing(image.listing_id)
+
         return True
+
+    def reorder_for_listing(
+        self,
+        listing_id: UUID,
+        ordered_image_ids: list[UUID],
+    ) -> list[ListingImage]:
+        if len(ordered_image_ids) != len(set(ordered_image_ids)):
+            raise ValueError("image_ids must not contain duplicates")
+
+        current = self._ordered_images(listing_id)
+        current_ids = [image.id for image in current]
+        if current_ids or ordered_image_ids:
+            if len(current_ids) != len(ordered_image_ids) or set(current_ids) != set(ordered_image_ids):
+                raise ValueError("image_ids must contain every current image exactly once")
+
+        updated: list[ListingImage] = []
+        for index, image_id in enumerate(ordered_image_ids, start=1):
+            image = self._store[image_id]
+            updated.append(replace(image, position=index))
+
+        for image in updated:
+            self._store[image.id] = image
+
+        return self._ordered_images(listing_id)
     
     def count_by_listing(self, listing_id: UUID) -> int:
         """Count images in a listing.
@@ -162,4 +194,4 @@ class MemoryListingImageRepository(ListingImageRepository):
         Returns:
             Number of images
         """
-        return len(self._by_listing.get(listing_id, []))
+        return len(self._ordered_images(listing_id))

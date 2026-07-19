@@ -11,6 +11,7 @@ if LICOS_ROOT.is_dir() and str(LICOS_ROOT) not in sys.path:
     sys.path.insert(0, str(LICOS_ROOT))
 
 from infrastructure.sqlite.database import Database
+from infrastructure.sqlite.listing_image_repository import SQLiteListingImageRepository
 from infrastructure.sqlite.user_repository import SQLiteUserRepository
 from infrastructure.sqlite.listing_repository import SQLiteListingRepository
 from infrastructure.sqlite.reservation_repository import SQLiteReservationRepository
@@ -21,7 +22,6 @@ from application.marketplace.service import MarketplaceService
 from application.media.service import MediaService
 from domain.listings.models import ItemCondition
 from domain.listings.images import ListingImage
-from infrastructure.repositories.memory import MemoryListingImageRepository
 from infrastructure.storage.local import LocalStorageProvider
 
 
@@ -42,10 +42,11 @@ def test_sqlite_basic_persistence_and_marketplace_integration(tmp_path):
 
     store = EventStore()
     recorder = EventRecorder(store)
-    image_repo = MemoryListingImageRepository()
+    image_repo = SQLiteListingImageRepository(db)
     media_service = MediaService(
         image_repo=image_repo,
         storage=LocalStorageProvider(tmp_path / "storage"),
+        listing_lookup=listing_repo.get,
     )
     mp = MarketplaceService(
         user_repository=user_repo,
@@ -75,7 +76,8 @@ def test_sqlite_basic_persistence_and_marketplace_integration(tmp_path):
                 size_bytes=1000,
                 position=index + 1,
                 created_at=datetime.now(UTC),
-            )
+            ),
+            storage_key=f"photo{index}.jpg",
         )
 
     # publish and reserve

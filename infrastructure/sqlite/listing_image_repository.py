@@ -13,14 +13,42 @@ class SQLiteListingImageRepository(ListingImageRepository):
     def __init__(self, db: Database):
         self.db = db
 
-    def store(self, image: ListingImage) -> None:
+    @staticmethod
+    def _hydrate(row) -> ListingImage:
+        return ListingImage(
+            id=UUID(row["id"]),
+            listing_id=UUID(row["listing_id"]),
+            filename=row["filename"],
+            content_type=row["content_type"],
+            size_bytes=int(row["size_bytes"]),
+            position=int(row["position"]),
+            created_at=datetime.fromisoformat(row["created_at"]),
+        )
+
+    def _get_listing_rows(self, conn, listing_id: UUID):
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT * FROM listing_images WHERE listing_id = ? ORDER BY position ASC, rowid ASC",
+            (str(listing_id),),
+        )
+        return cur.fetchall()
+
+    def _compact_listing_positions(self, conn, listing_id: UUID) -> None:
+        rows = self._get_listing_rows(conn, listing_id)
+        for index, row in enumerate(rows, start=1):
+            conn.execute(
+                "UPDATE listing_images SET position = ? WHERE id = ?",
+                (index, row["id"]),
+            )
+
+    def store(self, image: ListingImage, storage_key: str | None = None) -> None:
         conn = self.db.connect()
         cur = conn.cursor()
         cur.execute(
             """
-            INSERT OR REPLACE INTO listing_images
-            (id, listing_id, filename, content_type, size_bytes, position, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO listing_images
+            (id, listing_id, filename, content_type, size_bytes, position, storage_key, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 str(image.id),
@@ -29,6 +57,7 @@ class SQLiteListingImageRepository(ListingImageRepository):
                 image.content_type,
                 image.size_bytes,
                 image.position,
+                storage_key,
                 image.created_at.isoformat(),
             ),
         )
@@ -41,15 +70,7 @@ class SQLiteListingImageRepository(ListingImageRepository):
         row = cur.fetchone()
         if row is None:
             return None
-        return ListingImage(
-            id=UUID(row["id"]),
-            listing_id=UUID(row["listing_id"]),
-            filename=row["filename"],
-            content_type=row["content_type"],
-            size_bytes=int(row["size_bytes"]),
-            position=int(row["position"]),
-            created_at=datetime.fromisoformat(row["created_at"]),
-        )
+        return self._hydrate(row)
 
     def get_by_listing(self, listing_id: UUID) -> list[ListingImage]:
         conn = self.db.connect()
@@ -59,25 +80,68 @@ class SQLiteListingImageRepository(ListingImageRepository):
             (str(listing_id),),
         )
         rows = cur.fetchall()
-        return [
-            ListingImage(
-                id=UUID(row["id"]),
-                listing_id=UUID(row["listing_id"]),
-                filename=row["filename"],
-                content_type=row["content_type"],
-                size_bytes=int(row["size_bytes"]),
-                position=int(row["position"]),
-                created_at=datetime.fromisoformat(row["created_at"]),
-            )
-            for row in rows
-        ]
+        return [self._hydrate(row) for row in rows]
+
+    def get_storage_key(self, image_id: UUID) -> str | None:
+        conn = self.db.connect()
+        cur = conn.cursor()
+        cur.execute("SELECT storage_key FROM listing_images WHERE id = ?", (str(image_id),))
+        row = cur.fetchone()
+        if row is None:
+            return None
+        return row["storage_key"]
 
     def delete_by_id(self, image_id: UUID) -> bool:
         conn = self.db.connect()
         cur = conn.cursor()
-        cur.execute("DELETE FROM listing_images WHERE id = ?", (str(image_id),))
-        conn.commit()
-        return cur.rowcount > 0
+        cur.execute("SELECT listing_id FROM listing_images WHERE id = ?", (str(image_id),))
+        row = cur.fetchone()
+        if row is None:
+            return False
+
+        listing_id = UUID(row["listing_id"])
+        try:
+            cur.execute("DELETE FROM listing_images WHERE id = ?", (str(image_id),))
+            self._compact_listing_positions(conn, listing_id)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        return True
+
+    def reorder_for_listing(
+        self,
+        listing_id: UUID,
+        ordered_image_ids: list[UUID],
+    ) -> list[ListingImage]:
+        if len(ordered_image_ids) != len(set(ordered_image_ids)):
+            raise ValueError("image_ids must not contain duplicates")
+
+        conn = self.db.connect()
+        current_rows = self._get_listing_rows(conn, listing_id)
+        current_ids = [UUID(row["id"]) for row in current_rows]
+        if current_ids or ordered_image_ids:
+            if len(current_ids) != len(ordered_image_ids) or set(current_ids) != set(ordered_image_ids):
+                raise ValueError("image_ids must contain every current image exactly once")
+
+        try:
+            temp_offset = 100
+            for index, image_id in enumerate(ordered_image_ids, start=1):
+                conn.execute(
+                    "UPDATE listing_images SET position = ? WHERE id = ? AND listing_id = ?",
+                    (temp_offset + index, str(image_id), str(listing_id)),
+                )
+            for index, image_id in enumerate(ordered_image_ids, start=1):
+                conn.execute(
+                    "UPDATE listing_images SET position = ? WHERE id = ? AND listing_id = ?",
+                    (index, str(image_id), str(listing_id)),
+                )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+
+        return self.get_by_listing(listing_id)
 
     def count_by_listing(self, listing_id: UUID) -> int:
         conn = self.db.connect()

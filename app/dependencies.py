@@ -22,6 +22,7 @@ from infrastructure.sqlite.database import Database
 from infrastructure.sqlite.listing_image_repository import SQLiteListingImageRepository
 from infrastructure.sqlite.listing_repository import SQLiteListingRepository
 from infrastructure.sqlite.reservation_repository import SQLiteReservationRepository
+from infrastructure.sqlite.search_repository import SQLiteSearchRepository
 from infrastructure.sqlite.user_repository import SQLiteUserRepository
 from infrastructure.security.credentials import MemoryCredentialRepository
 from infrastructure.storage.local import LocalStorageProvider
@@ -64,6 +65,7 @@ storage_provider = LocalStorageProvider(Path(settings.storage_path))
 media_service = MediaService(
     image_repo=image_repository,
     storage=storage_provider,
+    listing_lookup=listing_repository.get,
 )
 marketplace_service = MarketplaceService(
     user_repository=user_repository,
@@ -72,6 +74,10 @@ marketplace_service = MarketplaceService(
     event_recorder=event_recorder,
     media_service=media_service,
 )
+search_repository = None
+if settings.repository_backend == "sqlite":
+    # Listing repository was created with a shared Database instance in sqlite mode.
+    search_repository = SQLiteSearchRepository(listing_repository.db)
 
 
 def reset_singletons() -> None:
@@ -81,7 +87,7 @@ def reset_singletons() -> None:
     so that environment-variable overrides take effect between tests.
     """
     global user_repository, listing_repository, reservation_repository, image_repository
-    global credential_repository, event_store, event_recorder, marketplace_service
+    global credential_repository, event_store, event_recorder, marketplace_service, search_repository
     global storage_provider, media_service
 
     user_repository, listing_repository, reservation_repository, image_repository = _build_repositories()
@@ -92,6 +98,7 @@ def reset_singletons() -> None:
     media_service = MediaService(
         image_repo=image_repository,
         storage=storage_provider,
+        listing_lookup=listing_repository.get,
     )
     marketplace_service = MarketplaceService(
         user_repository=user_repository,
@@ -100,6 +107,9 @@ def reset_singletons() -> None:
         event_recorder=event_recorder,
         media_service=media_service,
     )
+    search_repository = None
+    if settings.repository_backend == "sqlite":
+        search_repository = SQLiteSearchRepository(listing_repository.db)
 
 
 def get_user_repository() -> Any:
@@ -140,3 +150,7 @@ def get_storage_provider() -> LocalStorageProvider:
 
 def get_media_service() -> MediaService:
     return media_service
+
+
+def get_search_repository() -> Any:
+    return search_repository

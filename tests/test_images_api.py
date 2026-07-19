@@ -4,6 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 from app.main import app
 from app.dependencies import reset_singletons
+from infrastructure.security.tokens import create_access_token
 
 
 @pytest.fixture(autouse=True)
@@ -48,6 +49,26 @@ def _create_user_and_listing(client, email_suffix=""):
 
 class TestImageUploadAPI:
     """Tests for image upload endpoints."""
+
+    @pytest.fixture(autouse=True)
+    def _jwt_secret(self, monkeypatch):
+        monkeypatch.setenv("LOONI_JWT_SECRET", "looni-test-secret-key-32-bytes-minimum-2026")
+        yield
+        monkeypatch.delenv("LOONI_JWT_SECRET", raising=False)
+
+    def _auth_headers(self, user_id):
+        return {"Authorization": f"Bearer {create_access_token(user_id)}"}
+
+    def _upload_three_images(self, client, listing_id):
+        image_ids = []
+        for i in range(3):
+            response = client.post(
+                f"/api/v1/listings/{listing_id}/images",
+                files={"file": (f"photo{i}.jpg", f"data-{i}".encode(), "image/jpeg")},
+            )
+            assert response.status_code == 201
+            image_ids.append(response.json()["id"])
+        return image_ids
     
     def test_upload_image_to_listing(self):
         """Test uploading an image to a listing."""
@@ -237,20 +258,17 @@ class TestImageUploadAPI:
         client = TestClient(app)
         user_id, listing_id = _create_user_and_listing(client)
         
-        # Upload image
-        upload_response = client.post(
-            f"/api/v1/listings/{listing_id}/images",
-            files={"file": ("photo.jpg", b"data", "image/jpeg")},
-        )
-        image_id = upload_response.json()["id"]
+        image_ids = self._upload_three_images(client, listing_id)
         
         # Delete image
-        delete_response = client.delete(f"/api/v1/listings/{listing_id}/images/{image_id}")
+        delete_response = client.delete(f"/api/v1/listings/{listing_id}/images/{image_ids[1]}")
         assert delete_response.status_code == 204
         
         # Verify deleted
         list_response = client.get(f"/api/v1/listings/{listing_id}/images")
-        assert list_response.json()["count"] == 0
+        assert list_response.json()["count"] == 2
+        assert [item["position"] for item in list_response.json()["items"]] == [1, 2]
+        assert [item["id"] for item in list_response.json()["items"]] == [image_ids[0], image_ids[2]]
     
     def test_delete_nonexistent_image_returns_404(self):
         """Test deleting nonexistent image returns 404."""
@@ -266,3 +284,122 @@ class TestImageUploadAPI:
         
         response = client.delete(f"/api/v1/listings/{uuid4()}/images/{uuid4()}")
         assert response.status_code == 404
+
+    def test_owner_can_reorder_images(self):
+        client = TestClient(app)
+        user_id, listing_id = _create_user_and_listing(client)
+        image_ids = self._upload_three_images(client, listing_id)
+
+        response = client.patch(
+            f"/api/v1/listings/{listing_id}/images/order",
+            json={"image_ids": [image_ids[2], image_ids[0], image_ids[1]]},
+            headers=self._auth_headers(user_id),
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert [item["id"] for item in data["items"]] == [image_ids[2], image_ids[0], image_ids[1]]
+        assert [item["position"] for item in data["items"]] == [1, 2, 3]
+
+    def test_get_listing_images_reflects_new_order(self):
+        client = TestClient(app)
+        user_id, listing_id = _create_user_and_listing(client)
+        image_ids = self._upload_three_images(client, listing_id)
+
+        response = client.patch(
+            f"/api/v1/listings/{listing_id}/images/order",
+            json={"image_ids": [image_ids[1], image_ids[2], image_ids[0]]},
+            headers=self._auth_headers(user_id),
+        )
+        assert response.status_code == 200
+
+        listed = client.get(f"/api/v1/listings/{listing_id}/images")
+        assert listed.status_code == 200
+        assert [item["id"] for item in listed.json()["items"]] == [image_ids[1], image_ids[2], image_ids[0]]
+
+    def test_reorder_unauthenticated_request_rejected(self):
+        client = TestClient(app)
+        _, listing_id = _create_user_and_listing(client)
+        image_ids = self._upload_three_images(client, listing_id)
+
+        response = client.patch(
+            f"/api/v1/listings/{listing_id}/images/order",
+            json={"image_ids": image_ids},
+        )
+
+        assert response.status_code == 401
+
+    def test_reorder_non_owner_request_rejected(self):
+        client = TestClient(app)
+        owner_id, listing_id = _create_user_and_listing(client)
+        image_ids = self._upload_three_images(client, listing_id)
+
+        other_user = client.post(
+            "/api/v1/users",
+            json={"display_name": "Other User", "email": f"other-{uuid4().hex[:8]}@example.com"},
+        )
+        other_user_id = other_user.json()["id"]
+        client.post(f"/api/v1/users/{other_user_id}/activate")
+
+        response = client.patch(
+            f"/api/v1/listings/{listing_id}/images/order",
+            json={"image_ids": [image_ids[2], image_ids[0], image_ids[1]]},
+            headers=self._auth_headers(other_user_id),
+        )
+
+        assert owner_id != other_user_id
+        assert response.status_code == 403
+
+    def test_reorder_duplicate_missing_and_unknown_ids_rejected(self):
+        client = TestClient(app)
+        user_id, listing_id = _create_user_and_listing(client)
+        image_ids = self._upload_three_images(client, listing_id)
+        headers = self._auth_headers(user_id)
+
+        duplicate_response = client.patch(
+            f"/api/v1/listings/{listing_id}/images/order",
+            json={"image_ids": [image_ids[0], image_ids[0], image_ids[2]]},
+            headers=headers,
+        )
+        assert duplicate_response.status_code == 422
+
+        missing_response = client.patch(
+            f"/api/v1/listings/{listing_id}/images/order",
+            json={"image_ids": [image_ids[0], image_ids[1]]},
+            headers=headers,
+        )
+        assert missing_response.status_code == 422
+
+        unknown_response = client.patch(
+            f"/api/v1/listings/{listing_id}/images/order",
+            json={"image_ids": [image_ids[0], image_ids[1], str(uuid4())]},
+            headers=headers,
+        )
+        assert unknown_response.status_code == 422
+
+    def test_reorder_foreign_image_id_rejected(self):
+        client = TestClient(app)
+        user_id, listing_id = _create_user_and_listing(client)
+        image_ids = self._upload_three_images(client, listing_id)
+        _, other_listing_id = _create_user_and_listing(client, email_suffix="-other")
+        foreign_image_id = self._upload_three_images(client, other_listing_id)[0]
+
+        response = client.patch(
+            f"/api/v1/listings/{listing_id}/images/order",
+            json={"image_ids": [image_ids[0], image_ids[1], foreign_image_id]},
+            headers=self._auth_headers(user_id),
+        )
+
+        assert response.status_code == 422
+
+    def test_delete_primary_image_promotes_previous_position_two(self):
+        client = TestClient(app)
+        _, listing_id = _create_user_and_listing(client)
+        image_ids = self._upload_three_images(client, listing_id)
+
+        delete_response = client.delete(f"/api/v1/listings/{listing_id}/images/{image_ids[0]}")
+        assert delete_response.status_code == 204
+
+        listed = client.get(f"/api/v1/listings/{listing_id}/images")
+        assert [item["id"] for item in listed.json()["items"]] == [image_ids[1], image_ids[2]]
+        assert [item["position"] for item in listed.json()["items"]] == [1, 2]

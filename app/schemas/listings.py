@@ -5,6 +5,7 @@ from decimal import Decimal
 from uuid import UUID
 
 from pydantic import BaseModel, constr, ConfigDict
+from domain.listings.models import ItemCondition
 
 
 class ListingCreate(BaseModel):
@@ -14,7 +15,7 @@ class ListingCreate(BaseModel):
     price: Decimal
     currency: constr(strip_whitespace=True, min_length=1)
     category: constr(strip_whitespace=True, min_length=1)
-    condition: constr(strip_whitespace=True, min_length=1)
+    condition: ItemCondition
     location: constr(strip_whitespace=True, min_length=1)
 
 
