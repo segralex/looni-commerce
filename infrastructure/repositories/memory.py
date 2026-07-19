@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from collections.abc import Mapping
+import threading
 from typing import Any
 from uuid import UUID
 
@@ -14,6 +15,7 @@ from domain.repositories import (
 )
 from domain.listings.images import ListingImage
 from domain.listings.repositories import ListingImageRepository
+from domain.media.processing import ImageProcessingStatus, infer_processing_status
 
 
 class _MemoryRepository:
@@ -95,6 +97,7 @@ class MemoryListingImageRepository(ListingImageRepository):
         self._thumbnail_small_keys: dict[UUID, str | None] = {}
         self._thumbnail_medium_keys: dict[UUID, str | None] = {}
         self._thumbnail_large_keys: dict[UUID, str | None] = {}
+        self._lock = threading.Lock()
 
     def _ordered_images(self, listing_id: UUID) -> list[ListingImage]:
         images = [image for image in self._store.values() if image.listing_id == listing_id]
@@ -143,6 +146,9 @@ class MemoryListingImageRepository(ListingImageRepository):
             ListingImage or None if not found
         """
         return self._store.get(image_id)
+
+    def get(self, image_id: UUID) -> ListingImage | None:
+        return self.get_by_id(image_id)
     
     def get_by_listing(self, listing_id: UUID) -> list[ListingImage]:
         """Get all images for a listing.
@@ -167,6 +173,60 @@ class MemoryListingImageRepository(ListingImageRepository):
         if size == "large":
             return self._thumbnail_large_keys.get(image_id)
         raise ValueError("thumbnail size must be one of: small, medium, large")
+
+    def claim_for_processing(self, image_id: UUID, max_attempts: int) -> ListingImage | None:
+        with self._lock:
+            image = self._store.get(image_id)
+            if image is None:
+                return None
+            if image.processing_status == ImageProcessingStatus.READY:
+                return None
+            if image.processing_status == ImageProcessingStatus.PROCESSING:
+                return None
+            if image.processing_attempts >= max_attempts:
+                return None
+
+            claimed = replace(
+                image,
+                processing_status=ImageProcessingStatus.PROCESSING,
+                processing_attempts=image.processing_attempts + 1,
+            )
+            self._store[image_id] = claimed
+            return claimed
+
+    def mark_ready(self, image_id: UUID, thumbnails: dict[str, str]) -> ListingImage | None:
+        with self._lock:
+            image = self._store.get(image_id)
+            if image is None:
+                return None
+
+            ready = replace(
+                image,
+                thumbnail_small=thumbnails.get("small"),
+                thumbnail_medium=thumbnails.get("medium"),
+                thumbnail_large=thumbnails.get("large"),
+                processing_status=ImageProcessingStatus.READY,
+                processing_error=None,
+            )
+            self._store[image_id] = ready
+            self._thumbnail_small_keys[image_id] = thumbnails.get("small")
+            self._thumbnail_medium_keys[image_id] = thumbnails.get("medium")
+            self._thumbnail_large_keys[image_id] = thumbnails.get("large")
+            return ready
+
+    def mark_failed(self, image_id: UUID, error: str) -> ListingImage | None:
+        with self._lock:
+            image = self._store.get(image_id)
+            if image is None:
+                return None
+
+            failed = replace(
+                image,
+                processing_status=ImageProcessingStatus.FAILED,
+                processing_error=error,
+            )
+            self._store[image_id] = failed
+            return failed
     
     def delete_by_id(self, image_id: UUID) -> bool:
         """Delete image by ID.
@@ -188,6 +248,9 @@ class MemoryListingImageRepository(ListingImageRepository):
         self._compact_listing(image.listing_id)
 
         return True
+
+    def count_ready_by_listing(self, listing_id: UUID) -> int:
+        return len([image for image in self._ordered_images(listing_id) if image.processing_status == ImageProcessingStatus.READY])
 
     def reorder_for_listing(
         self,

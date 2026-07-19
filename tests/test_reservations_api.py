@@ -2,7 +2,7 @@ from fastapi.testclient import TestClient
 import pytest
 
 from app.main import app
-from app.dependencies import reset_singletons
+from app.dependencies import reset_singletons, get_event_dispatcher
 from tests.conftest import make_jpeg_bytes
 
 
@@ -22,6 +22,7 @@ def _upload_minimum_images(listing_id: str) -> None:
             files={"file": (f"photo{index}.jpg", make_jpeg_bytes(), "image/jpeg")},
         )
         assert response.status_code == 201
+    assert get_event_dispatcher().wait_until_idle(timeout=2.0)
 
 
 def test_create_and_get_reservation():

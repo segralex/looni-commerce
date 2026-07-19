@@ -63,6 +63,15 @@ class Database:
         if "thumbnail_large_key" not in columns:
             cur.execute("ALTER TABLE listing_images ADD COLUMN thumbnail_large_key TEXT")
 
+        if "processing_status" not in columns:
+            cur.execute("ALTER TABLE listing_images ADD COLUMN processing_status TEXT NOT NULL DEFAULT 'PENDING'")
+
+        if "processing_error" not in columns:
+            cur.execute("ALTER TABLE listing_images ADD COLUMN processing_error TEXT")
+
+        if "processing_attempts" not in columns:
+            cur.execute("ALTER TABLE listing_images ADD COLUMN processing_attempts INTEGER NOT NULL DEFAULT 0")
+
         self._normalize_listing_image_positions(cur)
         cur.execute("CREATE INDEX IF NOT EXISTS idx_listing_images_listing_id ON listing_images (listing_id)")
         cur.execute(

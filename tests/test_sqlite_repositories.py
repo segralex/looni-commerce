@@ -22,6 +22,7 @@ from application.marketplace.service import MarketplaceService
 from application.media.service import MediaService
 from domain.listings.models import ItemCondition
 from domain.listings.images import ListingImage
+from domain.media.processing import ImageProcessingStatus
 from infrastructure.storage.local import LocalStorageProvider
 
 
@@ -76,8 +77,17 @@ def test_sqlite_basic_persistence_and_marketplace_integration(tmp_path):
                 size_bytes=1000,
                 position=index + 1,
                 created_at=datetime.now(UTC),
+                thumbnail_small=f"small-{index}.jpg",
+                thumbnail_medium=f"medium-{index}.jpg",
+                thumbnail_large=f"large-{index}.jpg",
+                processing_status=ImageProcessingStatus.READY,
+                processing_error=None,
+                processing_attempts=1,
             ),
             storage_key=f"photo{index}.jpg",
+            thumbnail_small_key=f"small-{index}.jpg",
+            thumbnail_medium_key=f"medium-{index}.jpg",
+            thumbnail_large_key=f"large-{index}.jpg",
         )
 
     # publish and reserve

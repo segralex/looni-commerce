@@ -4,13 +4,12 @@ from io import BytesIO
 from uuid import uuid4
 
 import pytest
-from PIL import Image
 
 from application.media.service import MediaService
-from application.media.thumbnail_service import ThumbnailService
+from infrastructure.media.pillow_validator import PillowImageValidator
 from infrastructure.repositories.memory import MemoryListingImageRepository
-from infrastructure.media.pillow_processor import PillowImageProcessor
 from infrastructure.storage.local import LocalStorageProvider
+from tests.conftest import make_jpeg_bytes
 
 
 class NoTouchStorageProvider(LocalStorageProvider):
@@ -28,11 +27,17 @@ class NoTouchStorageProvider(LocalStorageProvider):
         self.delete_calls.append(storage_key)
 
 
-def _image_bytes(image_format: str = "JPEG") -> bytes:
-    image = Image.new("RGB", (32, 24), (32, 64, 180))
-    buf = BytesIO()
-    image.save(buf, format=image_format)
-    return buf.getvalue()
+class RecordingPublisher:
+    def __init__(self):
+        self.published: list[object] = []
+
+    def publish(self, event: object) -> None:
+        self.published.append(event)
+
+
+class FailingPublisher:
+    def publish(self, event: object) -> None:
+        raise RuntimeError("dispatcher unavailable")
 
 
 def test_media_service_validates_exact_image_set_for_reorder(tmp_path):
@@ -86,46 +91,67 @@ def test_media_service_delete_delegates_binary_removal(tmp_path):
     assert tracking_storage.delete_calls == [storage_key]
 
 
-def test_media_service_upload_generates_thumbnails_and_delete_removes_all_assets(tmp_path):
+def test_media_service_upload_persists_pending_and_publishes_event(tmp_path):
     repo = MemoryListingImageRepository()
     storage = LocalStorageProvider(tmp_path / "storage")
-    thumbnails = ThumbnailService(processor=PillowImageProcessor(), storage=storage)
-    service = MediaService(image_repo=repo, storage=storage, thumbnail_service=thumbnails)
+    publisher = RecordingPublisher()
+    service = MediaService(
+        image_repo=repo,
+        storage=storage,
+        event_publisher=publisher,
+        image_validator=PillowImageValidator(),
+    )
 
     listing_id = uuid4()
-    image = service.upload_image(listing_id, BytesIO(_image_bytes("JPEG")), "image/jpeg", "one.jpg")
+    image = service.upload_image(listing_id, BytesIO(make_jpeg_bytes()), "image/jpeg", "one.jpg")
 
     original_key = repo.get_storage_key(image.id)
-    small_key = repo.get_thumbnail_key(image.id, "small")
-    medium_key = repo.get_thumbnail_key(image.id, "medium")
-    large_key = repo.get_thumbnail_key(image.id, "large")
 
     assert original_key is not None and storage.exists(original_key)
-    assert small_key is not None and storage.exists(small_key)
-    assert medium_key is not None and storage.exists(medium_key)
-    assert large_key is not None and storage.exists(large_key)
-    assert image.thumbnails == {
-        "small": small_key,
-        "medium": medium_key,
-        "large": large_key,
-    }
+    assert image.processing_status.value == "PENDING"
+    assert image.processing_error is None
+    assert image.processing_attempts == 0
+    assert image.thumbnails == {"small": None, "medium": None, "large": None}
+    assert len(publisher.published) == 1
 
     assert service.delete_image(image.id) is True
     assert storage.exists(original_key) is False
-    assert storage.exists(small_key) is False
-    assert storage.exists(medium_key) is False
-    assert storage.exists(large_key) is False
 
 
-def test_media_service_upload_rolls_back_original_on_thumbnail_failure(tmp_path):
+def test_media_service_upload_marks_failed_when_event_publication_fails(tmp_path):
     repo = MemoryListingImageRepository()
     storage = LocalStorageProvider(tmp_path / "storage")
-    thumbnails = ThumbnailService(processor=PillowImageProcessor(), storage=storage)
-    service = MediaService(image_repo=repo, storage=storage, thumbnail_service=thumbnails)
+    service = MediaService(
+        image_repo=repo,
+        storage=storage,
+        event_publisher=FailingPublisher(),
+        image_validator=PillowImageValidator(),
+    )
 
     listing_id = uuid4()
-    with pytest.raises(ValueError, match="invalid image data"):
+    with pytest.raises(RuntimeError, match="could not be scheduled"):
+        service.upload_image(listing_id, BytesIO(make_jpeg_bytes()), "image/jpeg", "broken.jpg")
+
+    images = repo.get_by_listing(listing_id)
+    assert len(images) == 1
+    assert images[0].processing_status.value == "FAILED"
+    assert images[0].processing_error is not None
+
+
+def test_media_service_rejects_invalid_image_before_publication(tmp_path):
+    repo = MemoryListingImageRepository()
+    storage = LocalStorageProvider(tmp_path / "storage")
+    publisher = RecordingPublisher()
+    service = MediaService(
+        image_repo=repo,
+        storage=storage,
+        event_publisher=publisher,
+        image_validator=PillowImageValidator(),
+    )
+
+    listing_id = uuid4()
+    with pytest.raises(ValueError, match="Unable to decode image"):
         service.upload_image(listing_id, BytesIO(b"not-an-image"), "image/jpeg", "broken.jpg")
 
     assert repo.count_by_listing(listing_id) == 0
-    assert list((tmp_path / "storage").iterdir()) == []
+    assert publisher.published == []

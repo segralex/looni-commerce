@@ -5,7 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 from app.main import app
-from app.dependencies import reset_singletons
+from app.dependencies import reset_singletons, get_event_dispatcher
 from infrastructure.security.tokens import create_access_token
 
 
@@ -97,8 +97,9 @@ class TestImageUploadAPI:
         assert data["content_type"] == "image/jpeg"
         assert data["size_bytes"] == len(image_data)
         assert "id" in data
-        assert sorted(data["thumbnails"].keys()) == ["large", "medium", "small"]
-        assert all(data["thumbnails"][size] for size in ["small", "medium", "large"])
+        assert data["processing_status"] == "PENDING"
+        assert data["processing_error"] is None
+        assert data["thumbnails"] == {}
     
     def test_upload_multiple_images_increment_position(self):
         """Test that multiple uploads increment position."""
@@ -223,6 +224,8 @@ class TestImageUploadAPI:
                 f"/api/v1/listings/{listing_id}/images",
                 files={"file": (f"photo{i}.jpg", self._image_bytes("JPEG"), "image/jpeg")},
             )
+
+        assert get_event_dispatcher().wait_until_idle(timeout=2.0)
         
         # List images
         response = client.get(f"/api/v1/listings/{listing_id}/images")
@@ -239,6 +242,7 @@ class TestImageUploadAPI:
         assert first_image["position"] == 1
         assert first_image["content_type"] == "image/jpeg"
         assert "size_bytes" in first_image
+        assert first_image["processing_status"] == "READY"
         assert sorted(first_image["thumbnails"].keys()) == ["large", "medium", "small"]
         
         # Check second image

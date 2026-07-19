@@ -5,6 +5,7 @@ from uuid import UUID
 
 from domain.listings.images import ListingImage
 from domain.listings.repositories import ListingImageRepository
+from domain.media.processing import ImageProcessingStatus, infer_processing_status
 
 from .database import Database
 
@@ -15,6 +16,16 @@ class SQLiteListingImageRepository(ListingImageRepository):
 
     @staticmethod
     def _hydrate(row) -> ListingImage:
+        thumbnail_small = row["thumbnail_small_key"] if "thumbnail_small_key" in row.keys() else None
+        thumbnail_medium = row["thumbnail_medium_key"] if "thumbnail_medium_key" in row.keys() else None
+        thumbnail_large = row["thumbnail_large_key"] if "thumbnail_large_key" in row.keys() else None
+        status_value = row["processing_status"] if "processing_status" in row.keys() else None
+        attempts = int(row["processing_attempts"]) if "processing_attempts" in row.keys() and row["processing_attempts"] is not None else 0
+        error = row["processing_error"] if "processing_error" in row.keys() else None
+        if status_value is None:
+            processing_status = infer_processing_status(all([thumbnail_small, thumbnail_medium, thumbnail_large]))
+        else:
+            processing_status = ImageProcessingStatus(status_value)
         return ListingImage(
             id=UUID(row["id"]),
             listing_id=UUID(row["listing_id"]),
@@ -23,9 +34,12 @@ class SQLiteListingImageRepository(ListingImageRepository):
             size_bytes=int(row["size_bytes"]),
             position=int(row["position"]),
             created_at=datetime.fromisoformat(row["created_at"]),
-            thumbnail_small=row["thumbnail_small_key"],
-            thumbnail_medium=row["thumbnail_medium_key"],
-            thumbnail_large=row["thumbnail_large_key"],
+            thumbnail_small=thumbnail_small,
+            thumbnail_medium=thumbnail_medium,
+            thumbnail_large=thumbnail_large,
+            processing_status=processing_status,
+            processing_error=error,
+            processing_attempts=attempts,
         )
 
     def _get_listing_rows(self, conn, listing_id: UUID):
@@ -68,9 +82,12 @@ class SQLiteListingImageRepository(ListingImageRepository):
                 thumbnail_small_key,
                 thumbnail_medium_key,
                 thumbnail_large_key,
+                processing_status,
+                processing_error,
+                processing_attempts,
                 created_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 str(image.id),
@@ -83,6 +100,9 @@ class SQLiteListingImageRepository(ListingImageRepository):
                 thumbnail_small_key,
                 thumbnail_medium_key,
                 thumbnail_large_key,
+                image.processing_status.value,
+                image.processing_error,
+                image.processing_attempts,
                 image.created_at.isoformat(),
             ),
         )
@@ -150,6 +170,111 @@ class SQLiteListingImageRepository(ListingImageRepository):
             conn.rollback()
             raise
         return True
+
+    def get(self, image_id: UUID) -> ListingImage | None:
+        return self.get_by_id(image_id)
+
+    def claim_for_processing(self, image_id: UUID, max_attempts: int) -> ListingImage | None:
+        conn = self.db.connect()
+        cur = conn.cursor()
+        try:
+            cur.execute("BEGIN IMMEDIATE")
+            cur.execute("SELECT * FROM listing_images WHERE id = ?", (str(image_id),))
+            row = cur.fetchone()
+            if row is None:
+                conn.rollback()
+                return None
+
+            image = self._hydrate(row)
+            if image.processing_status == ImageProcessingStatus.READY:
+                conn.rollback()
+                return None
+            if image.processing_status == ImageProcessingStatus.PROCESSING:
+                conn.rollback()
+                return None
+            if image.processing_attempts >= max_attempts:
+                conn.rollback()
+                return None
+
+            next_attempt = image.processing_attempts + 1
+            cur.execute(
+                """
+                UPDATE listing_images
+                SET processing_status = 'PROCESSING',
+                    processing_attempts = ?
+                WHERE id = ?
+                """,
+                (next_attempt, str(image_id)),
+            )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+
+        claimed = self.get_by_id(image_id)
+        return claimed
+
+    def mark_ready(self, image_id: UUID, thumbnails: dict[str, str]) -> ListingImage | None:
+        conn = self.db.connect()
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                """
+                UPDATE listing_images
+                SET thumbnail_small_key = ?,
+                    thumbnail_medium_key = ?,
+                    thumbnail_large_key = ?,
+                    processing_status = 'READY',
+                    processing_error = NULL
+                WHERE id = ?
+                """,
+                (
+                    thumbnails.get("small"),
+                    thumbnails.get("medium"),
+                    thumbnails.get("large"),
+                    str(image_id),
+                ),
+            )
+            if cur.rowcount == 0:
+                conn.rollback()
+                return None
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        return self.get_by_id(image_id)
+
+    def mark_failed(self, image_id: UUID, error: str) -> ListingImage | None:
+        conn = self.db.connect()
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                """
+                UPDATE listing_images
+                SET processing_status = 'FAILED',
+                    processing_error = ?
+                WHERE id = ?
+                """,
+                (error, str(image_id)),
+            )
+            if cur.rowcount == 0:
+                conn.rollback()
+                return None
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        return self.get_by_id(image_id)
+
+    def count_ready_by_listing(self, listing_id: UUID) -> int:
+        conn = self.db.connect()
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT COUNT(*) AS count FROM listing_images WHERE listing_id = ? AND processing_status = 'READY'",
+            (str(listing_id),),
+        )
+        row = cur.fetchone()
+        return int(row["count"])
 
     def reorder_for_listing(
         self,

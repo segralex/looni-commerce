@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
 from domain.listings.exceptions import InvalidImagePositionError
+from domain.media.processing import ImageProcessingStatus, infer_processing_status
 
 
 
@@ -30,6 +31,9 @@ class ListingImage:
     thumbnail_small: str | None = None
     thumbnail_medium: str | None = None
     thumbnail_large: str | None = None
+    processing_status: ImageProcessingStatus = ImageProcessingStatus.PENDING
+    processing_error: str | None = None
+    processing_attempts: int = 0
     
     def __post_init__(self):
         """Validate constraints after initialization."""
@@ -43,6 +47,14 @@ class ListingImage:
             raise ValueError("Content type cannot be empty")
         if self.size_bytes < 0:
             raise ValueError("Size bytes cannot be negative")
+        if self.processing_attempts < 0:
+            raise ValueError("Processing attempts cannot be negative")
+        if self.processing_status == ImageProcessingStatus.PENDING and self.has_required_thumbnails:
+            self.processing_status = infer_processing_status(True)
+        if self.processing_status == ImageProcessingStatus.READY and not self.has_required_thumbnails:
+            self.processing_status = infer_processing_status(False)
+        if self.processing_status == ImageProcessingStatus.READY and self.processing_error:
+            self.processing_error = None
     
     @property
     def is_image(self) -> bool:
@@ -68,3 +80,7 @@ class ListingImage:
             "medium": self.thumbnail_medium,
             "large": self.thumbnail_large,
         }
+
+    @property
+    def has_required_thumbnails(self) -> bool:
+        return all([self.thumbnail_small, self.thumbnail_medium, self.thumbnail_large])

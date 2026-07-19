@@ -211,9 +211,11 @@ class MarketplaceService:
 
             # Check minimum image requirement
             if self.media_service:
-                images = self.media_service.get_listing_images(listing_id)
-                if len(images) < 2:
-                    raise MarketplaceWorkflowError("listing must have at least 2 images to publish")
+                ready_count = self.media_service.count_ready_images(listing_id)
+                if ready_count < 2:
+                    raise MarketplaceWorkflowError(
+                        "At least two successfully processed images are required to publish a listing."
+                    )
 
             publish_candidate = deepcopy(listing)
             publish_candidate.status = ListingStatus.PUBLISHED
@@ -238,9 +240,11 @@ class MarketplaceService:
 
             # Check minimum image requirement
             if self.media_service:
-                images = self.media_service.get_listing_images(listing_id)
-                if len(images) < 2:
-                    raise MarketplaceWorkflowError("listing must have at least 2 images to publish")
+                ready_count = self.media_service.count_ready_images(listing_id)
+                if ready_count < 2:
+                    raise MarketplaceWorkflowError(
+                        "At least two successfully processed images are required to publish a listing."
+                    )
 
             try:
                 published = self.listing_service.publish(listing_id)

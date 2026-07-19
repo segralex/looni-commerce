@@ -2,7 +2,7 @@ from fastapi.testclient import TestClient
 import pytest
 
 from app.main import app
-from app.dependencies import reset_singletons, get_event_store
+from app.dependencies import reset_singletons, get_event_store, get_event_dispatcher
 from tests.conftest import make_jpeg_bytes
 
 
@@ -22,6 +22,7 @@ def test_full_marketplace_flow_and_licos_events():
                 files={"file": (f"photo{index}.jpg", make_jpeg_bytes(), "image/jpeg")},
             )
             assert response.status_code == 201
+        assert get_event_dispatcher().wait_until_idle(timeout=2.0)
 
     # 1-2 Create and activate seller
     seller = client.post("/api/v1/users/", json={"display_name": "Seller", "email": "seller@example.com"}).json()

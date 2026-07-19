@@ -3,7 +3,7 @@ from uuid import UUID, uuid4
 import pytest
 
 from app.main import app
-from app.dependencies import reset_singletons
+from app.dependencies import reset_singletons, get_event_dispatcher
 from domain.listings.models import ItemCondition
 from tests.conftest import make_jpeg_bytes
 
@@ -58,6 +58,7 @@ def _upload_images(listing_id: str, count: int) -> None:
             },
         )
         assert response.status_code == 201, response.text
+    assert get_event_dispatcher().wait_until_idle(timeout=2.0)
 
 
 def test_create_listing():
@@ -86,7 +87,7 @@ def test_publish_listing_fails_with_zero_images():
 
     response = client.post(f"/api/v1/listings/{listing_id}/publish")
     assert response.status_code == 409
-    assert "at least 2 images" in response.json()["detail"]
+    assert "successfully processed images" in response.json()["detail"]
 
     listing_response = client.get(f"/api/v1/listings/{listing_id}")
     assert listing_response.status_code == 200
@@ -99,7 +100,7 @@ def test_publish_listing_fails_with_one_image():
 
     response = client.post(f"/api/v1/listings/{listing_id}/publish")
     assert response.status_code == 409
-    assert "at least 2 images" in response.json()["detail"]
+    assert "successfully processed images" in response.json()["detail"]
 
     listing_response = client.get(f"/api/v1/listings/{listing_id}")
     assert listing_response.status_code == 200

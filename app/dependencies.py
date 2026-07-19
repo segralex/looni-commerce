@@ -12,6 +12,8 @@ if os.path.isdir(LICOS_ROOT) and LICOS_ROOT not in sys.path:
 
 from pathlib import Path
 from infrastructure.config.settings import settings
+from infrastructure.events.in_process_dispatcher import InProcessEventDispatcher
+from infrastructure.media.pillow_validator import PillowImageValidator
 from infrastructure.repositories.memory import (
     MemoryListingRepository,
     MemoryListingImageRepository,
@@ -32,6 +34,8 @@ from kernel.integration.recorder import EventRecorder
 from application.marketplace.service import MarketplaceService
 from application.media.service import MediaService
 from application.media.thumbnail_service import ThumbnailService
+from application.media.image_uploaded_handler import ImageUploadedHandler
+from domain.media.events import ImageUploaded
 
 
 def _build_repositories() -> tuple[Any, Any, Any, Any]:
@@ -65,11 +69,22 @@ event_store = EventStore()
 event_recorder = EventRecorder(event_store)
 storage_provider = LocalStorageProvider(Path(settings.storage_path))
 thumbnail_service = ThumbnailService(PillowImageProcessor(), storage_provider)
+image_validator = PillowImageValidator()
+event_dispatcher = InProcessEventDispatcher()
+image_uploaded_handler = ImageUploadedHandler(
+    image_repo=image_repository,
+    storage=storage_provider,
+    thumbnail_service=thumbnail_service,
+)
+event_dispatcher.register(ImageUploaded, image_uploaded_handler.handle)
+event_dispatcher.start()
 media_service = MediaService(
     image_repo=image_repository,
     storage=storage_provider,
     listing_lookup=listing_repository.get,
     thumbnail_service=thumbnail_service,
+    event_publisher=event_dispatcher,
+    image_validator=image_validator,
 )
 marketplace_service = MarketplaceService(
     user_repository=user_repository,
@@ -93,7 +108,12 @@ def reset_singletons() -> None:
     global user_repository, listing_repository, reservation_repository, image_repository
     global credential_repository, event_store, event_recorder, marketplace_service, search_repository
     global storage_provider, media_service
-    global thumbnail_service
+    global thumbnail_service, image_validator, event_dispatcher, image_uploaded_handler
+
+    try:
+        event_dispatcher.stop()
+    except Exception:
+        pass
 
     user_repository, listing_repository, reservation_repository, image_repository = _build_repositories()
     credential_repository = MemoryCredentialRepository()
@@ -101,11 +121,22 @@ def reset_singletons() -> None:
     event_recorder = EventRecorder(event_store)
     storage_provider = LocalStorageProvider(Path(settings.storage_path))
     thumbnail_service = ThumbnailService(PillowImageProcessor(), storage_provider)
+    image_validator = PillowImageValidator()
+    event_dispatcher = InProcessEventDispatcher()
+    image_uploaded_handler = ImageUploadedHandler(
+        image_repo=image_repository,
+        storage=storage_provider,
+        thumbnail_service=thumbnail_service,
+    )
+    event_dispatcher.register(ImageUploaded, image_uploaded_handler.handle)
+    event_dispatcher.start()
     media_service = MediaService(
         image_repo=image_repository,
         storage=storage_provider,
         listing_lookup=listing_repository.get,
         thumbnail_service=thumbnail_service,
+        event_publisher=event_dispatcher,
+        image_validator=image_validator,
     )
     marketplace_service = MarketplaceService(
         user_repository=user_repository,
@@ -157,6 +188,10 @@ def get_storage_provider() -> LocalStorageProvider:
 
 def get_media_service() -> MediaService:
     return media_service
+
+
+def get_event_dispatcher() -> InProcessEventDispatcher:
+    return event_dispatcher
 
 
 def get_search_repository() -> Any:

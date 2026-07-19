@@ -1,14 +1,19 @@
 """Media application service."""
-from uuid import UUID, uuid4
-from datetime import datetime
+from __future__ import annotations
+
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, BinaryIO, Callable
+from uuid import UUID, uuid4
 import tempfile
 
-from application.media.thumbnail_service import ThumbnailService
+from application.events.publisher import EventPublisher
+from domain.listings.exceptions import MaxImagesExceededError
 from domain.listings.images import ListingImage
 from domain.listings.repositories import ListingImageRepository
-from domain.listings.exceptions import MaxImagesExceededError
+from domain.media.events import ImageUploaded
+from domain.media.processing import ImageProcessingStatus, sanitize_processing_error
+from domain.media.validator import ImageValidator
 from domain.storage import StorageProvider
 
 
@@ -22,7 +27,9 @@ class MediaService:
         image_repo: ListingImageRepository,
         storage: StorageProvider,
         listing_lookup: Callable[[UUID], Any] | None = None,
-        thumbnail_service: ThumbnailService | None = None,
+        thumbnail_service: Any | None = None,
+        event_publisher: EventPublisher | None = None,
+        image_validator: ImageValidator | None = None,
     ):
         """Initialize media service.
         
@@ -34,6 +41,8 @@ class MediaService:
         self.storage = storage
         self.listing_lookup = listing_lookup
         self.thumbnail_service = thumbnail_service
+        self.event_publisher = event_publisher
+        self.image_validator = image_validator
     
     def upload_image(
         self,
@@ -70,31 +79,15 @@ class MediaService:
             tmp_path = tmp.name
 
         image_id = uuid4()
-        created_storage_keys: list[str] = []
+        stored_file = None
+        original_storage_key: str | None = None
 
         try:
-            stored_file = self.storage.save(tmp_path, content_type)
-            created_storage_keys.append(stored_file.storage_key)
+            if self.image_validator is not None:
+                self.image_validator.validate(tmp_path)
 
-            thumbnail_keys = {
-                "small": None,
-                "medium": None,
-                "large": None,
-            }
-            if self.thumbnail_service is not None:
-                created_thumbnails = self.thumbnail_service.generate_and_store(tmp_path, content_type)
-                thumbnail_keys = {
-                    "small": created_thumbnails["small"].storage_key,
-                    "medium": created_thumbnails["medium"].storage_key,
-                    "large": created_thumbnails["large"].storage_key,
-                }
-                created_storage_keys.extend(
-                    [
-                        thumbnail_keys["small"],
-                        thumbnail_keys["medium"],
-                        thumbnail_keys["large"],
-                    ]
-                )
+            stored_file = self.storage.save(tmp_path, content_type)
+            original_storage_key = stored_file.storage_key
 
             existing_images = self.image_repo.get_by_listing(listing_id)
             next_position = len(existing_images) + 1
@@ -106,26 +99,40 @@ class MediaService:
                 content_type=content_type,
                 size_bytes=stored_file.size_bytes,
                 position=next_position,
-                created_at=datetime.now(),
-                thumbnail_small=thumbnail_keys["small"],
-                thumbnail_medium=thumbnail_keys["medium"],
-                thumbnail_large=thumbnail_keys["large"],
+                created_at=datetime.now(UTC),
+                processing_status=ImageProcessingStatus.PENDING,
+                processing_error=None,
+                processing_attempts=0,
             )
 
-            self.image_repo.store(
-                image,
-                storage_key=stored_file.storage_key,
-                thumbnail_small_key=thumbnail_keys["small"],
-                thumbnail_medium_key=thumbnail_keys["medium"],
-                thumbnail_large_key=thumbnail_keys["large"],
+            try:
+                self.image_repo.store(image, storage_key=stored_file.storage_key)
+            except Exception:
+                self.storage.delete(stored_file.storage_key)
+                raise
+
+            event = ImageUploaded.create(
+                image_id=str(image.id),
+                listing_id=str(image.listing_id),
+                original_storage_key=stored_file.storage_key,
+                occurred_at=image.created_at,
             )
+
+            if self.event_publisher is not None:
+                try:
+                    self.event_publisher.publish(event)
+                except Exception as exc:
+                    safe_error = sanitize_processing_error(exc)
+                    self.image_repo.mark_failed(image_id, safe_error)
+                    raise RuntimeError("Image processing could not be scheduled") from exc
 
             return image
+        except RuntimeError:
+            raise
         except Exception:
-            for storage_key in reversed(created_storage_keys):
-                if storage_key is not None:
-                    self.storage.delete(storage_key)
-            self.image_repo.delete_by_id(image_id)
+            if original_storage_key is not None and self.image_repo.get(image_id) is not None:
+                self.storage.delete(original_storage_key)
+                self.image_repo.delete_by_id(image_id)
             raise
         finally:
             Path(tmp_path).unlink(missing_ok=True)
@@ -140,6 +147,12 @@ class MediaService:
             List of ListingImage entities ordered by position
         """
         return self.image_repo.get_by_listing(listing_id)
+
+    def count_ready_images(self, listing_id: UUID) -> int:
+        return self.image_repo.count_ready_by_listing(listing_id)
+
+    def get_image(self, image_id: UUID) -> ListingImage | None:
+        return self.image_repo.get(image_id)
 
     def reorder_listing_images(
         self,
@@ -184,8 +197,12 @@ class MediaService:
             self.image_repo.get_thumbnail_key(image_id, "large"),
         ]
 
+        deleted = self.image_repo.delete_by_id(image_id)
+        if not deleted:
+            return False
+
         for storage_key in storage_keys:
             if storage_key:
                 self.storage.delete(storage_key)
 
-        return self.image_repo.delete_by_id(image_id)
+        return True

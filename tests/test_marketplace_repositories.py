@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 # Ensure licos-core is importable when running tests from looni-commerce
-LICOS_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "200_LICOS", "licos-core"))
+LICOS_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "200_LICOS", "licos-core"))
 if os.path.isdir(LICOS_ROOT) and LICOS_ROOT not in sys.path:
     sys.path.insert(0, LICOS_ROOT)
 
@@ -16,6 +16,7 @@ from domain.repositories import EntityNotFoundError
 from domain.reservations.models import ReservationStatus
 from domain.users.models import UserStatus
 from domain.listings.images import ListingImage
+from domain.media.processing import ImageProcessingStatus
 from infrastructure.repositories.memory import (
     MemoryListingRepository,
     MemoryReservationRepository,
@@ -46,6 +47,24 @@ def make_marketplace():
         media_service=media_service,
     )
     return user_repo, listing_repo, reservation_repo, image_repo, store, recorder, service, media_service
+
+
+def _make_ready_image(listing_id, position: int) -> ListingImage:
+    return ListingImage(
+        id=uuid4(),
+        listing_id=listing_id,
+        filename=f"test{position}.jpg",
+        content_type="image/jpeg",
+        size_bytes=1000,
+        position=position,
+        created_at=UTC.localize(datetime.utcnow()) if hasattr(UTC, 'localize') else datetime.now(UTC),
+        thumbnail_small=f"small-{position}.jpg",
+        thumbnail_medium=f"medium-{position}.jpg",
+        thumbnail_large=f"large-{position}.jpg",
+        processing_status=ImageProcessingStatus.READY,
+        processing_error=None,
+        processing_attempts=1,
+    )
 
 
 def test_create_and_retrieve_user():
@@ -106,16 +125,7 @@ def test_publish_persisted_listing():
 
     # Add 2 images to allow publishing
     for i in range(2):
-        image = ListingImage(
-            id=uuid4(),
-            listing_id=listing.id,
-            filename=f"test{i}.jpg",
-            content_type="image/jpeg",
-            size_bytes=1000,
-            position=i + 1,
-            created_at=UTC.localize(datetime.utcnow()) if hasattr(UTC, 'localize') else datetime.now(UTC),
-        )
-        image_repo.store(image)
+        image_repo.store(_make_ready_image(listing.id, i + 1))
 
     published = mp.publish_listing(seller.id, listing.id)
 
@@ -143,16 +153,7 @@ def test_create_and_retrieve_reservation():
     
     # Add 2 images to allow publishing
     for i in range(2):
-        image = ListingImage(
-            id=uuid4(),
-            listing_id=listing.id,
-            filename=f"test{i}.jpg",
-            content_type="image/jpeg",
-            size_bytes=1000,
-            position=i + 1,
-            created_at=UTC.localize(datetime.utcnow()) if hasattr(UTC, 'localize') else datetime.now(UTC),
-        )
-        image_repo.store(image)
+        image_repo.store(_make_ready_image(listing.id, i + 1))
     
     mp.publish_listing(seller.id, listing.id)
 
@@ -185,16 +186,7 @@ def test_accept_updates_both_stored_reservation_and_listing():
     
     # Add 2 images to allow publishing
     for i in range(2):
-        image = ListingImage(
-            id=uuid4(),
-            listing_id=listing.id,
-            filename=f"test{i}.jpg",
-            content_type="image/jpeg",
-            size_bytes=1000,
-            position=i + 1,
-            created_at=UTC.localize(datetime.utcnow()) if hasattr(UTC, 'localize') else datetime.now(UTC),
-        )
-        image_repo.store(image)
+        image_repo.store(_make_ready_image(listing.id, i + 1))
     
     mp.publish_listing(seller.id, listing.id)
     reservation = mp.create_reservation(buyer.id, listing.id)
@@ -225,16 +217,7 @@ def test_cancel_reservation_restores_listing_via_service():
     
     # Add 2 images to allow publishing
     for i in range(2):
-        image = ListingImage(
-            id=uuid4(),
-            listing_id=listing.id,
-            filename=f"test{i}.jpg",
-            content_type="image/jpeg",
-            size_bytes=1000,
-            position=i + 1,
-            created_at=UTC.localize(datetime.utcnow()) if hasattr(UTC, 'localize') else datetime.now(UTC),
-        )
-        image_repo.store(image)
+            image_repo.store(_make_ready_image(listing.id, i + 1))
     
     mp.publish_listing(seller.id, listing.id)
     reservation = mp.create_reservation(buyer.id, listing.id)
@@ -296,16 +279,7 @@ def test_failed_workflow_preserves_repository_state():
     
     # Add 2 images to allow publishing
     for i in range(2):
-        image = ListingImage(
-            id=uuid4(),
-            listing_id=listing.id,
-            filename=f"test{i}.jpg",
-            content_type="image/jpeg",
-            size_bytes=1000,
-            position=i + 1,
-            created_at=UTC.localize(datetime.utcnow()) if hasattr(UTC, 'localize') else datetime.now(UTC),
-        )
-        image_repo.store(image)
+            image_repo.store(_make_ready_image(listing.id, i + 1))
     
     mp.publish_listing(seller.id, listing.id)
     reservation = mp.create_reservation(buyer.id, listing.id)
@@ -361,16 +335,7 @@ def test_licos_events_still_emitted_in_correct_order():
     
     # Add 2 images to allow publishing
     for i in range(2):
-        image = ListingImage(
-            id=uuid4(),
-            listing_id=listing.id,
-            filename=f"test{i}.jpg",
-            content_type="image/jpeg",
-            size_bytes=1000,
-            position=i + 1,
-            created_at=UTC.localize(datetime.utcnow()) if hasattr(UTC, 'localize') else datetime.now(UTC),
-        )
-        image_repo.store(image)
+        image_repo.store(_make_ready_image(listing.id, i + 1))
     
     mp.publish_listing(seller.id, listing.id)
     reservation = mp.create_reservation(buyer.id, listing.id)
@@ -403,7 +368,7 @@ def test_publish_listing_fails_with_zero_images():
     with pytest.raises(MarketplaceWorkflowError) as exc_info:
         mp.publish_listing(seller.id, listing.id)
     
-    assert "at least 2 images" in str(exc_info.value)
+    assert "successfully processed images" in str(exc_info.value)
     
     # Verify listing state unchanged
     assert listing_repo.get(listing.id).status == ListingStatus.DRAFT
@@ -427,22 +392,13 @@ def test_publish_listing_fails_with_one_image():
     )
     
     # Add only 1 image
-    image = ListingImage(
-        id=uuid4(),
-        listing_id=listing.id,
-        filename="test0.jpg",
-        content_type="image/jpeg",
-        size_bytes=1000,
-        position=1,
-        created_at=UTC.localize(datetime.utcnow()) if hasattr(UTC, 'localize') else datetime.now(UTC),
-    )
-    image_repo.store(image)
+    image_repo.store(_make_ready_image(listing.id, 1))
     
     # Attempt to publish with only 1 image
     with pytest.raises(MarketplaceWorkflowError) as exc_info:
         mp.publish_listing(seller.id, listing.id)
     
-    assert "at least 2 images" in str(exc_info.value)
+    assert "successfully processed images" in str(exc_info.value)
     
     # Verify listing state unchanged
     assert listing_repo.get(listing.id).status == ListingStatus.DRAFT
@@ -467,16 +423,7 @@ def test_publish_listing_succeeds_with_exactly_two_images():
     
     # Add exactly 2 images
     for i in range(2):
-        image = ListingImage(
-            id=uuid4(),
-            listing_id=listing.id,
-            filename=f"test{i}.jpg",
-            content_type="image/jpeg",
-            size_bytes=1000,
-            position=i + 1,
-            created_at=UTC.localize(datetime.utcnow()) if hasattr(UTC, 'localize') else datetime.now(UTC),
-        )
-        image_repo.store(image)
+        image_repo.store(_make_ready_image(listing.id, i + 1))
     
     # Publish should succeed
     published = mp.publish_listing(seller.id, listing.id)
@@ -504,16 +451,7 @@ def test_publish_listing_succeeds_with_ten_images():
     
     # Add 10 images
     for i in range(10):
-        image = ListingImage(
-            id=uuid4(),
-            listing_id=listing.id,
-            filename=f"test{i}.jpg",
-            content_type="image/jpeg",
-            size_bytes=1000,
-            position=i + 1,
-            created_at=UTC.localize(datetime.utcnow()) if hasattr(UTC, 'localize') else datetime.now(UTC),
-        )
-        image_repo.store(image)
+        image_repo.store(_make_ready_image(listing.id, i + 1))
     
     # Publish should succeed
     published = mp.publish_listing(seller.id, listing.id)

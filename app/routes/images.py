@@ -1,6 +1,8 @@
 """Image upload API routes."""
 from uuid import UUID
 from fastapi import APIRouter, Depends, File, UploadFile, status, HTTPException
+from fastapi.responses import StreamingResponse
+from starlette.background import BackgroundTask
 from application.media.service import MediaService
 from application.marketplace.service import MarketplaceWorkflowError
 from app.routes.auth import _get_current_user_id
@@ -9,9 +11,34 @@ from app.dependencies import (
     get_media_service,
 )
 from app.schemas.images import ListingImageResponse, ListingImagesListResponse, ListingImageOrderRequest
+from domain.media.processing import ImageProcessingStatus
+from domain.listings.images import ListingImage
 from domain.listings.exceptions import MaxImagesExceededError
 
 router = APIRouter(tags=["images"])
+
+
+def _build_image_response(image: ListingImage) -> dict[str, object]:
+    base_url = f"/api/v1/images/{image.id}"
+    thumbnails: dict[str, str] = {}
+    if image.processing_status == ImageProcessingStatus.READY:
+        thumbnails = {
+            "small": f"{base_url}/thumbnails/small",
+            "medium": f"{base_url}/thumbnails/medium",
+            "large": f"{base_url}/thumbnails/large",
+        }
+
+    return {
+        "id": image.id,
+        "listing_id": image.listing_id,
+        "original_url": f"{base_url}/original",
+        "position": image.position,
+        "content_type": image.content_type,
+        "size_bytes": image.size_bytes,
+        "processing_status": image.processing_status,
+        "processing_error": image.processing_error,
+        "thumbnails": thumbnails,
+    }
 
 
 @router.post(
@@ -51,7 +78,7 @@ def upload_image(
             content_type=file.content_type,
             filename=file.filename or "upload",
         )
-        return image
+        return _build_image_response(image)
     except MaxImagesExceededError as e:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -60,6 +87,11 @@ def upload_image(
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(e),
+        )
+    except RuntimeError as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e),
         )
 
@@ -83,7 +115,7 @@ def list_images(
     images = media_service.get_listing_images(listing_id)
     return {
         "count": len(images),
-        "items": images,
+        "items": [_build_image_response(image) for image in images],
     }
 
 
@@ -140,5 +172,70 @@ def reorder_images(
 
     return {
         "count": len(images),
-        "items": images,
+        "items": [_build_image_response(image) for image in images],
     }
+
+
+@router.get("/images/{image_id}/original")
+def get_original_image(
+    image_id: UUID,
+    media_service: MediaService = Depends(get_media_service),
+):
+    image = media_service.get_image(image_id)
+    if image is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Image not found")
+
+    storage_key = media_service.image_repo.get_storage_key(image_id)
+    if storage_key is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Image not found")
+
+    handle = media_service.storage.open(storage_key)
+    return StreamingResponse(
+        handle,
+        media_type=image.content_type,
+        background=BackgroundTask(handle.close),
+    )
+
+
+@router.get("/images/{image_id}/thumbnails/{size}")
+def get_thumbnail_image(
+    image_id: UUID,
+    size: str,
+    media_service: MediaService = Depends(get_media_service),
+):
+    if size not in {"small", "medium", "large"}:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid thumbnail size")
+
+    image = media_service.get_image(image_id)
+    if image is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Image not found")
+
+    if image.processing_status == ImageProcessingStatus.PENDING:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "IMAGE_PROCESSING_NOT_READY",
+                "message": "The requested thumbnail is not ready.",
+                "processing_status": image.processing_status,
+            },
+        )
+    if image.processing_status == ImageProcessingStatus.FAILED:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "IMAGE_PROCESSING_FAILED",
+                "message": "Thumbnail processing failed.",
+                "processing_status": image.processing_status,
+            },
+        )
+
+    storage_key = media_service.image_repo.get_thumbnail_key(image_id, size)
+    if storage_key is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Thumbnail not found")
+
+    handle = media_service.storage.open(storage_key)
+    return StreamingResponse(
+        handle,
+        media_type=image.content_type,
+        background=BackgroundTask(handle.close),
+    )

@@ -62,6 +62,9 @@ CREATE_LISTING_IMAGES = (
         thumbnail_small_key TEXT,
         thumbnail_medium_key TEXT,
         thumbnail_large_key TEXT,
+        processing_status TEXT NOT NULL DEFAULT 'PENDING',
+        processing_error TEXT,
+        processing_attempts INTEGER NOT NULL DEFAULT 0,
         created_at TEXT NOT NULL
     );
     """

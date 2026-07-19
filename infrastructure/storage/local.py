@@ -67,17 +67,24 @@ class LocalStorageProvider:
         if content_type not in self.SUPPORTED_TYPES:
             raise ValueError(f"Unsupported content type: {content_type}")
         
-        # Generate UUID-based storage key with safe extension
         extension = self.SUPPORTED_TYPES[content_type]
         storage_key = f"{uuid4()}{extension}"
-        
-        # Get full path and ensure parent directory exists
+        return self.save_as(source_path, storage_key, content_type)
+
+    def save_as(self, source_path: str, storage_key: str, content_type: str) -> StoredFile:
+        """Save a file to an explicit storage key."""
+        source = Path(source_path)
+        if not source.exists():
+            raise FileNotFoundError(f"Source file not found: {source_path}")
+
+        if content_type not in self.SUPPORTED_TYPES:
+            raise ValueError(f"Unsupported content type: {content_type}")
+
         full_path = self._get_full_path(storage_key)
         full_path.parent.mkdir(parents=True, exist_ok=True)
-        
-        # Copy file without loading entire content into memory
+
         size_bytes = 0
-        chunk_size = 1024 * 1024  # 1 MB chunks
+        chunk_size = 1024 * 1024
         with open(source, "rb") as src, open(full_path, "wb") as dst:
             while True:
                 chunk = src.read(chunk_size)
@@ -85,12 +92,8 @@ class LocalStorageProvider:
                     break
                 dst.write(chunk)
                 size_bytes += len(chunk)
-        
-        return StoredFile(
-            storage_key=storage_key,
-            size_bytes=size_bytes,
-            content_type=content_type,
-        )
+
+        return StoredFile(storage_key=storage_key, size_bytes=size_bytes, content_type=content_type)
     
     def open(self, storage_key: str) -> BinaryIO:
         """Open a stored file for reading.
@@ -121,7 +124,11 @@ class LocalStorageProvider:
         try:
             full_path = self._get_full_path(storage_key)
             if full_path.exists():
-                full_path.unlink()
+                try:
+                    full_path.unlink()
+                except PermissionError:
+                    # Best-effort delete: a concurrent reader may still have the file open.
+                    pass
         except ValueError:
             # Path traversal attempt - silently ignore for idempotency
             pass

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 
-from app.dependencies import get_marketplace_service
+from app.dependencies import get_marketplace_service, get_event_dispatcher
 from app.middleware.logging import RequestLoggingMiddleware
 from app.routes import listings_router, users_router, search_router, reservations_router
 from app.routes.auth import router as auth_router
@@ -11,7 +13,17 @@ from infrastructure.logging.config import configure_logging
 
 configure_logging()
 
-app = FastAPI(title="Looni Commerce")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    dispatcher = get_event_dispatcher()
+    dispatcher.start()
+    try:
+        yield
+    finally:
+        dispatcher.stop()
+
+
+app = FastAPI(title="Looni Commerce", lifespan=lifespan)
 app.add_middleware(RequestLoggingMiddleware)
 marketplace_service = get_marketplace_service()
 

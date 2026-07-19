@@ -30,6 +30,19 @@ class StorageProvider(Protocol):
             ValueError: If content_type is not supported
         """
         ...
+
+    def save_as(self, source_path: str, storage_key: str, content_type: str) -> StoredFile:
+        """Save a file to an explicit storage key.
+
+        Args:
+            source_path: Path to source file to save
+            storage_key: Target storage key within the provider
+            content_type: MIME type (e.g. "image/jpeg")
+
+        Returns:
+            StoredFile with the requested storage_key
+        """
+        ...
     
     def open(self, storage_key: str) -> BinaryIO:
         """Open a stored file for reading.

@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 import app.dependencies as deps
 from app.main import app
 from infrastructure.sqlite.database import Database
+from app.dependencies import get_event_dispatcher
 from tests.conftest import make_jpeg_bytes
 
 
@@ -56,6 +57,7 @@ def _upload_min_images(client: TestClient, listing_id: str):
             files={"file": (f"p{i}.jpg", make_jpeg_bytes(), "image/jpeg")},
         )
         assert r.status_code == 201
+    assert get_event_dispatcher().wait_until_idle(timeout=2.0)
 
 
 def test_sqlite_search_sync_and_filtering(sqlite_env):
