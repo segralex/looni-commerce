@@ -2,10 +2,14 @@ from __future__ import annotations
 
 from dataclasses import replace
 from collections.abc import Mapping
+from datetime import UTC, datetime
 import threading
 from typing import Any
 from uuid import UUID
 
+from domain.events.outbox import OutboxEntry, OutboxState
+from domain.events.metrics import EventMetrics
+from domain.events.serialization import deserialize_event, serialize_event
 from domain.repositories import (
     DuplicateEntityError,
     EntityNotFoundError,
@@ -286,3 +290,194 @@ class MemoryListingImageRepository(ListingImageRepository):
             Number of images
         """
         return len(self._ordered_images(listing_id))
+
+
+class MemoryOutboxRepository:
+    def __init__(self, metrics: EventMetrics | None = None) -> None:
+        self._entries: dict[str, dict[str, Any]] = {}
+        self._order: list[str] = []
+        self._lock = threading.Lock()
+        self._notifier = None
+        self._metrics = metrics
+
+    def set_notifier(self, notifier) -> None:
+        self._notifier = notifier
+
+    def save(self, event) -> OutboxEntry:
+        payload = serialize_event(event)
+        entry_id = event.event_id
+        with self._lock:
+            self._entries[entry_id] = {
+                "id": entry_id,
+                "event": payload,
+                "published": False,
+                "published_at": None,
+                "retry_count": 0,
+                "permanently_failed": False,
+                "failed_at": None,
+                "failure_reason": None,
+            }
+            if entry_id not in self._order:
+                self._order.append(entry_id)
+            entry = self._hydrate(self._entries[entry_id])
+        if self._notifier is not None:
+            self._notifier()
+        self._sync_metrics()
+        return entry
+
+    def get(self, entry_id: str) -> OutboxEntry | None:
+        with self._lock:
+            row = self._entries.get(entry_id)
+            if row is None:
+                return None
+            return self._hydrate(row)
+
+    def list_unpublished(
+        self,
+        limit: int | None = None,
+        max_retry_count: int | None = None,
+    ) -> list[OutboxEntry]:
+        with self._lock:
+            rows = [
+                self._entries[entry_id]
+                for entry_id in self._order
+                if not self._entries[entry_id]["published"]
+                and not self._entries[entry_id]["permanently_failed"]
+                and (max_retry_count is None or self._entries[entry_id]["retry_count"] < max_retry_count)
+            ]
+            if limit is not None:
+                rows = rows[:limit]
+            return [self._hydrate(row) for row in rows]
+
+    def get_unpublished(
+        self,
+        limit: int | None = None,
+        max_retry_count: int | None = None,
+    ) -> list[OutboxEntry]:
+        return self.list_unpublished(limit=limit, max_retry_count=max_retry_count)
+
+    def get_failed(self, limit: int | None = None) -> list[OutboxEntry]:
+        with self._lock:
+            rows = [
+                self._entries[entry_id]
+                for entry_id in self._order
+                if self._entries[entry_id]["permanently_failed"]
+            ]
+            if limit is not None:
+                rows = rows[:limit]
+            return [self._hydrate(row) for row in rows]
+
+    def get_by_aggregate(self, aggregate_type: str, aggregate_id: str) -> list[OutboxEntry]:
+        with self._lock:
+            rows = [
+                self._entries[entry_id]
+                for entry_id in self._order
+                if self._entries[entry_id]["event"]["aggregate_type"] == aggregate_type
+                and self._entries[entry_id]["event"]["aggregate_id"] == aggregate_id
+            ]
+            return [self._hydrate(row) for row in rows]
+
+    def query(
+        self, *, state: OutboxState | str | None = None,
+        status: OutboxState | str | None = None, event_type: str | None = None,
+        aggregate_id: str | None = None, correlation_id: str | None = None,
+        occurred_from: datetime | None = None, occurred_to: datetime | None = None,
+        limit: int | None = None,
+    ) -> list[OutboxEntry]:
+        requested_state = OutboxState(state or status) if (state or status) else None
+        with self._lock:
+            entries = [self._hydrate(self._entries[entry_id]) for entry_id in self._order]
+        result = [
+            entry for entry in entries
+            if (requested_state is None or entry.state == requested_state or
+                requested_state == OutboxState.FAILED and entry.permanently_failed)
+            and (event_type is None or entry.event.event_type == event_type)
+            and (aggregate_id is None or entry.event.aggregate_id == aggregate_id)
+            and (correlation_id is None or entry.event.correlation_id == correlation_id)
+            and (occurred_from is None or entry.event.occurred_at >= occurred_from)
+            and (occurred_to is None or entry.event.occurred_at <= occurred_to)
+        ]
+        return result[:limit] if limit is not None else result
+
+    def requeue(self, entry_ids: list[str]) -> list[OutboxEntry]:
+        result: list[OutboxEntry] = []
+        with self._lock:
+            for entry_id in entry_ids:
+                row = self._entries.get(entry_id)
+                if row is None or not row["permanently_failed"]:
+                    continue
+                row.update({
+                    "published": False, "published_at": None, "retry_count": 0,
+                    "permanently_failed": False, "failed_at": None,
+                    "failure_reason": None,
+                })
+                result.append(self._hydrate(row))
+        self._sync_metrics()
+        if result and self._notifier is not None:
+            self._notifier()
+        return result
+
+    def mark_published(self, entry_id: str, published_at: datetime) -> OutboxEntry | None:
+        with self._lock:
+            row = self._entries.get(entry_id)
+            if row is None:
+                return None
+            row["published"] = True
+            row["published_at"] = published_at.astimezone(UTC)
+            entry = self._hydrate(row)
+        self._sync_metrics()
+        return entry
+
+    def increment_retry(self, entry_id: str) -> OutboxEntry | None:
+        with self._lock:
+            row = self._entries.get(entry_id)
+            if row is None:
+                return None
+            row["retry_count"] += 1
+            entry = self._hydrate(row)
+        self._sync_metrics()
+        return entry
+
+    def mark_failed(self, entry_id: str, failed_at: datetime, failure_reason: str | None = None) -> OutboxEntry | None:
+        with self._lock:
+            row = self._entries.get(entry_id)
+            if row is None:
+                return None
+            row["permanently_failed"] = True
+            row["failed_at"] = failed_at.astimezone(UTC)
+            row["failure_reason"] = failure_reason
+            entry = self._hydrate(row)
+        self._sync_metrics()
+        return entry
+
+    def _hydrate(self, row: dict[str, Any]) -> OutboxEntry:
+        published_at = row["published_at"]
+        failed_at = row.get("failed_at")
+        if isinstance(published_at, str):
+            published_at = datetime.fromisoformat(published_at)
+        if isinstance(failed_at, str):
+            failed_at = datetime.fromisoformat(failed_at)
+        return OutboxEntry(
+            id=str(row["id"]),
+            event=deserialize_event(row["event"]),
+            published=bool(row["published"]),
+            published_at=published_at,
+            retry_count=int(row["retry_count"]),
+            permanently_failed=bool(row.get("permanently_failed", False)),
+            failed_at=failed_at,
+            failure_reason=row.get("failure_reason"),
+        )
+
+    def _sync_metrics(self) -> None:
+        if self._metrics is None:
+            return
+        with self._lock:
+            queue_depth = len(
+                [
+                    entry_id
+                    for entry_id in self._order
+                    if not self._entries[entry_id]["published"]
+                    and not self._entries[entry_id]["permanently_failed"]
+                ]
+            )
+        self._metrics.record_queue_depth(queue_depth)

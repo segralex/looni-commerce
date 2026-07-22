@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.dependencies import get_marketplace_service, get_event_dispatcher
+from app.dependencies import get_marketplace_service, get_event_dispatcher, get_outbox_worker
 from app.middleware.logging import RequestLoggingMiddleware
 from app.routes import listings_router, users_router, search_router, reservations_router
 from app.routes.auth import router as auth_router
@@ -16,10 +16,13 @@ configure_logging()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     dispatcher = get_event_dispatcher()
+    outbox_worker = get_outbox_worker()
     dispatcher.start()
+    outbox_worker.start()
     try:
         yield
     finally:
+        outbox_worker.stop()
         dispatcher.stop()
 
 

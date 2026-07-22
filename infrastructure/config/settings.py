@@ -46,5 +46,19 @@ class Settings:
         except ValueError:
             return 30
 
+    @property
+    def outbox_poll_interval_seconds(self) -> float:
+        try:
+            return float(os.environ.get("LOONI_OUTBOX_POLL_INTERVAL_SECONDS", "0.05"))
+        except ValueError:
+            return 0.05
+
+    @property
+    def outbox_max_retry_count(self) -> int:
+        try:
+            return int(os.environ.get("LOONI_OUTBOX_MAX_RETRY_COUNT", "3"))
+        except ValueError:
+            return 3
+
 
 settings = Settings()

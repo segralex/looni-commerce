@@ -8,6 +8,8 @@ from uuid import UUID, uuid4
 import tempfile
 
 from application.events.publisher import EventPublisher
+from domain.events.context import get_correlation_id
+from domain.events.outbox import OutboxRepository
 from domain.listings.exceptions import MaxImagesExceededError
 from domain.listings.images import ListingImage
 from domain.listings.repositories import ListingImageRepository
@@ -28,6 +30,7 @@ class MediaService:
         storage: StorageProvider,
         listing_lookup: Callable[[UUID], Any] | None = None,
         thumbnail_service: Any | None = None,
+        outbox: OutboxRepository | None = None,
         event_publisher: EventPublisher | None = None,
         image_validator: ImageValidator | None = None,
     ):
@@ -41,6 +44,7 @@ class MediaService:
         self.storage = storage
         self.listing_lookup = listing_lookup
         self.thumbnail_service = thumbnail_service
+        self.outbox = outbox
         self.event_publisher = event_publisher
         self.image_validator = image_validator
     
@@ -116,9 +120,17 @@ class MediaService:
                 listing_id=str(image.listing_id),
                 original_storage_key=stored_file.storage_key,
                 occurred_at=image.created_at,
+                correlation_id=get_correlation_id(),
             )
 
-            if self.event_publisher is not None:
+            if self.outbox is not None:
+                try:
+                    self.outbox.save(event)
+                except Exception as exc:
+                    safe_error = sanitize_processing_error(exc)
+                    self.image_repo.mark_failed(image_id, safe_error)
+                    raise RuntimeError("Image processing could not be scheduled") from exc
+            elif self.event_publisher is not None:
                 try:
                     self.event_publisher.publish(event)
                 except Exception as exc:

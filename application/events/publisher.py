@@ -10,6 +10,9 @@ class EventPublisher(Protocol):
 
 
 class EventDispatcher(EventPublisher, Protocol):
+    def dispatch(self, event: object) -> None:
+        ...
+
     def start(self) -> None:
         ...
 

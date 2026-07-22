@@ -89,3 +89,32 @@ CREATE_LISTING_SEARCH_FTS = (
     CREATE INDEX IF NOT EXISTS idx_listings_status ON listings (status);
     """
 )
+
+CREATE_EVENT_OUTBOX = (
+    """
+    CREATE TABLE IF NOT EXISTS event_outbox (
+        id TEXT PRIMARY KEY,
+        event_type TEXT NOT NULL,
+        aggregate_type TEXT NOT NULL,
+        aggregate_id TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        occurred_at TEXT NOT NULL,
+        correlation_id TEXT,
+        causation_id TEXT,
+        published INTEGER NOT NULL DEFAULT 0,
+        published_at TEXT,
+        retry_count INTEGER NOT NULL DEFAULT 0,
+        permanently_failed INTEGER NOT NULL DEFAULT 0,
+        failed_at TEXT,
+        failure_reason TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_event_outbox_unpublished
+        ON event_outbox (published, retry_count, occurred_at);
+    CREATE INDEX IF NOT EXISTS idx_event_outbox_failed
+        ON event_outbox (permanently_failed, failed_at);
+    CREATE INDEX IF NOT EXISTS idx_event_outbox_event_type ON event_outbox (event_type);
+    CREATE INDEX IF NOT EXISTS idx_event_outbox_aggregate_id ON event_outbox (aggregate_id);
+    CREATE INDEX IF NOT EXISTS idx_event_outbox_correlation_id ON event_outbox (correlation_id);
+    CREATE INDEX IF NOT EXISTS idx_event_outbox_occurred_at ON event_outbox (occurred_at);
+    """
+)

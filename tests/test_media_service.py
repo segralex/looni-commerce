@@ -6,6 +6,7 @@ from uuid import uuid4
 import pytest
 
 from application.media.service import MediaService
+from infrastructure.repositories.memory import MemoryOutboxRepository
 from infrastructure.media.pillow_validator import PillowImageValidator
 from infrastructure.repositories.memory import MemoryListingImageRepository
 from infrastructure.storage.local import LocalStorageProvider
@@ -38,6 +39,11 @@ class RecordingPublisher:
 class FailingPublisher:
     def publish(self, event: object) -> None:
         raise RuntimeError("dispatcher unavailable")
+
+
+class FailingOutbox:
+    def save(self, event: object) -> None:
+        raise RuntimeError("outbox unavailable")
 
 
 def test_media_service_validates_exact_image_set_for_reorder(tmp_path):
@@ -91,14 +97,14 @@ def test_media_service_delete_delegates_binary_removal(tmp_path):
     assert tracking_storage.delete_calls == [storage_key]
 
 
-def test_media_service_upload_persists_pending_and_publishes_event(tmp_path):
+def test_media_service_upload_persists_pending_and_saves_event_to_outbox(tmp_path):
     repo = MemoryListingImageRepository()
     storage = LocalStorageProvider(tmp_path / "storage")
-    publisher = RecordingPublisher()
+    outbox = MemoryOutboxRepository()
     service = MediaService(
         image_repo=repo,
         storage=storage,
-        event_publisher=publisher,
+        outbox=outbox,
         image_validator=PillowImageValidator(),
     )
 
@@ -112,19 +118,19 @@ def test_media_service_upload_persists_pending_and_publishes_event(tmp_path):
     assert image.processing_error is None
     assert image.processing_attempts == 0
     assert image.thumbnails == {"small": None, "medium": None, "large": None}
-    assert len(publisher.published) == 1
+    assert len(outbox.list_unpublished()) == 1
 
     assert service.delete_image(image.id) is True
     assert storage.exists(original_key) is False
 
 
-def test_media_service_upload_marks_failed_when_event_publication_fails(tmp_path):
+def test_media_service_upload_marks_failed_when_outbox_save_fails(tmp_path):
     repo = MemoryListingImageRepository()
     storage = LocalStorageProvider(tmp_path / "storage")
     service = MediaService(
         image_repo=repo,
         storage=storage,
-        event_publisher=FailingPublisher(),
+        outbox=FailingOutbox(),
         image_validator=PillowImageValidator(),
     )
 

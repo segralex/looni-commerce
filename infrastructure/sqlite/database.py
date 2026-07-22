@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import sqlite3
+import threading
 from typing import Optional
 from .schema import (
+    CREATE_EVENT_OUTBOX,
     CREATE_USERS,
     CREATE_LISTINGS,
     CREATE_RESERVATIONS,
@@ -15,13 +17,15 @@ class Database:
     def __init__(self, path: str):
         self.path = path
         self.conn: Optional[sqlite3.Connection] = None
+        self.lock = threading.RLock()
 
     def connect(self) -> sqlite3.Connection:
-        if self.conn is None:
-            self.conn = sqlite3.connect(self.path, check_same_thread=False)
-            self.conn.row_factory = sqlite3.Row
-            self._init_schema()
-        return self.conn
+        with self.lock:
+            if self.conn is None:
+                self.conn = sqlite3.connect(self.path, check_same_thread=False)
+                self.conn.row_factory = sqlite3.Row
+                self._init_schema()
+            return self.conn
 
     def _init_schema(self) -> None:
         cur = self.conn.cursor()
@@ -33,10 +37,12 @@ class Database:
                     CREATE_RESERVATIONS,
                     CREATE_LISTING_IMAGES,
                     CREATE_LISTING_SEARCH_FTS,
+                    CREATE_EVENT_OUTBOX,
                 ]
             )
         )
         self._migrate_listing_images_schema(cur)
+        self._migrate_event_outbox_schema(cur)
         self._bootstrap_listing_search_index(cur)
         self.conn.commit()
 
@@ -143,6 +149,43 @@ class Database:
               )
             """
         )
+
+    def _migrate_event_outbox_schema(self, cur: sqlite3.Cursor) -> None:
+        cur.execute("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'event_outbox'")
+        if cur.fetchone() is None:
+            return
+
+        cur.execute("PRAGMA table_info(event_outbox)")
+        columns = {row["name"] for row in cur.fetchall()}
+
+        if "published" not in columns:
+            cur.execute("ALTER TABLE event_outbox ADD COLUMN published INTEGER NOT NULL DEFAULT 0")
+
+        if "published_at" not in columns:
+            cur.execute("ALTER TABLE event_outbox ADD COLUMN published_at TEXT")
+
+        if "retry_count" not in columns:
+            cur.execute("ALTER TABLE event_outbox ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0")
+
+        if "permanently_failed" not in columns:
+            cur.execute("ALTER TABLE event_outbox ADD COLUMN permanently_failed INTEGER NOT NULL DEFAULT 0")
+
+        if "failed_at" not in columns:
+            cur.execute("ALTER TABLE event_outbox ADD COLUMN failed_at TEXT")
+
+        if "failure_reason" not in columns:
+            cur.execute("ALTER TABLE event_outbox ADD COLUMN failure_reason TEXT")
+
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_event_outbox_unpublished ON event_outbox (published, retry_count, occurred_at)"
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_event_outbox_failed ON event_outbox (permanently_failed, failed_at)"
+        )
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_event_outbox_event_type ON event_outbox (event_type)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_event_outbox_aggregate_id ON event_outbox (aggregate_id)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_event_outbox_correlation_id ON event_outbox (correlation_id)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_event_outbox_occurred_at ON event_outbox (occurred_at)")
 
     def close(self) -> None:
         if self.conn is not None:
