@@ -5,6 +5,7 @@ import threading
 from typing import Optional
 from .schema import (
     CREATE_EVENT_OUTBOX,
+    CREATE_TRUST_PROFILES,
     CREATE_USERS,
     CREATE_LISTINGS,
     CREATE_RESERVATIONS,
@@ -38,6 +39,7 @@ class Database:
                     CREATE_LISTING_IMAGES,
                     CREATE_LISTING_SEARCH_FTS,
                     CREATE_EVENT_OUTBOX,
+                    CREATE_TRUST_PROFILES,
                 ]
             )
         )

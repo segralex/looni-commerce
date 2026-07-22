@@ -31,6 +31,7 @@ from infrastructure.sqlite.outbox_repository import SQLiteOutboxRepository
 from infrastructure.sqlite.reservation_repository import SQLiteReservationRepository
 from infrastructure.sqlite.search_repository import SQLiteSearchRepository
 from infrastructure.sqlite.user_repository import SQLiteUserRepository
+from infrastructure.sqlite.trust_repository import SQLiteTrustRepository
 from infrastructure.security.credentials import MemoryCredentialRepository
 from infrastructure.media.pillow_processor import PillowImageProcessor
 from infrastructure.storage.local import LocalStorageProvider
@@ -41,6 +42,8 @@ from application.media.service import MediaService
 from application.media.thumbnail_service import ThumbnailService
 from application.media.image_uploaded_handler import ImageUploadedHandler
 from domain.media.events import ImageUploaded
+from infrastructure.repositories.memory import MemoryTrustRepository
+from application.trust.handlers import TrustEventHandlers
 
 
 class _EventPipelineController:
@@ -71,11 +74,18 @@ class _EventPipelineController:
         return self._dispatcher.wait_until_idle(timeout=timeout)
 
 
-def _register_event_handlers(registry: EventRegistry, image_handler: ImageUploadedHandler) -> None:
+def _register_event_handlers(
+    registry: EventRegistry, image_handler: ImageUploadedHandler,
+    trust_handlers: TrustEventHandlers,
+) -> None:
     registry.register(ImageUploaded, image_handler.handle)
+    for event_type in ("TransactionCompleted", "ReservationCompleted", "PaymentReleased"):
+        registry.register(event_type, trust_handlers.transaction_completed)
+    registry.register("ReviewSubmitted", trust_handlers.review_submitted)
+    registry.register("DisputeResolved", trust_handlers.dispute_resolved)
 
 
-def _build_repositories() -> tuple[Any, Any, Any, Any, Any]:
+def _build_repositories() -> tuple[Any, Any, Any, Any, Any, Any]:
     """Construct and return repositories based on settings."""
     backend = settings.repository_backend
     if backend == "memory":
@@ -85,6 +95,7 @@ def _build_repositories() -> tuple[Any, Any, Any, Any, Any]:
             MemoryReservationRepository(),
             MemoryListingImageRepository(),
             MemoryOutboxRepository(event_metrics),
+            MemoryTrustRepository(),
         )
     if backend == "sqlite":
         db_path = settings.database_path
@@ -96,6 +107,7 @@ def _build_repositories() -> tuple[Any, Any, Any, Any, Any]:
             SQLiteReservationRepository(db),
             SQLiteListingImageRepository(db),
             SQLiteOutboxRepository(db, event_metrics),
+            SQLiteTrustRepository(db),
         )
     raise ValueError(
         f"Unknown repository backend '{backend}'. Supported: 'memory', 'sqlite'."
@@ -103,7 +115,7 @@ def _build_repositories() -> tuple[Any, Any, Any, Any, Any]:
 
 
 event_metrics = EventMetrics()
-user_repository, listing_repository, reservation_repository, image_repository, outbox_repository = _build_repositories()
+user_repository, listing_repository, reservation_repository, image_repository, outbox_repository, trust_repository = _build_repositories()
 credential_repository = MemoryCredentialRepository()
 event_store = EventStore()
 event_recorder = EventRecorder(event_store)
@@ -127,7 +139,8 @@ image_uploaded_handler = ImageUploadedHandler(
     storage=storage_provider,
     thumbnail_service=thumbnail_service,
 )
-_register_event_handlers(event_registry, image_uploaded_handler)
+trust_event_handlers = TrustEventHandlers(trust_repository, outbox_repository)
+_register_event_handlers(event_registry, image_uploaded_handler, trust_event_handlers)
 event_pipeline.start()
 media_service = MediaService(
     image_repo=image_repository,
@@ -158,6 +171,7 @@ def reset_singletons() -> None:
     """
     global user_repository, listing_repository, reservation_repository, image_repository
     global outbox_repository
+    global trust_repository, trust_event_handlers
     global credential_repository, event_store, event_recorder, marketplace_service, search_repository
     global storage_provider, media_service
     global thumbnail_service, image_validator, event_registry, event_dispatcher, outbox_worker, event_pipeline, image_uploaded_handler, event_metrics
@@ -168,7 +182,7 @@ def reset_singletons() -> None:
         pass
 
     event_metrics = EventMetrics()
-    user_repository, listing_repository, reservation_repository, image_repository, outbox_repository = _build_repositories()
+    user_repository, listing_repository, reservation_repository, image_repository, outbox_repository, trust_repository = _build_repositories()
     credential_repository = MemoryCredentialRepository()
     event_store = EventStore()
     event_recorder = EventRecorder(event_store)
@@ -192,7 +206,8 @@ def reset_singletons() -> None:
         storage=storage_provider,
         thumbnail_service=thumbnail_service,
     )
-    _register_event_handlers(event_registry, image_uploaded_handler)
+    trust_event_handlers = TrustEventHandlers(trust_repository, outbox_repository)
+    _register_event_handlers(event_registry, image_uploaded_handler, trust_event_handlers)
     event_pipeline.start()
     media_service = MediaService(
         image_repo=image_repository,
@@ -268,6 +283,10 @@ def get_outbox_repository() -> Any:
 
 def get_event_metrics() -> EventMetrics:
     return event_metrics
+
+
+def get_trust_repository() -> Any:
+    return trust_repository
 
 
 def get_search_repository() -> Any:

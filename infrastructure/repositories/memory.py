@@ -20,6 +20,7 @@ from domain.repositories import (
 from domain.listings.images import ListingImage
 from domain.listings.repositories import ListingImageRepository
 from domain.media.processing import ImageProcessingStatus, infer_processing_status
+from domain.trust.aggregate import TrustAggregate
 
 
 class _MemoryRepository:
@@ -90,6 +91,25 @@ class MemoryReservationRepository(_MemoryRepository, ReservationRepository):
 
     def all(self) -> tuple[Any, ...]:
         return self._all()
+
+
+class MemoryTrustRepository:
+    def __init__(self) -> None:
+        self._profiles: dict[str, TrustAggregate] = {}
+        self._lock = threading.RLock()
+
+    def get(self, user_id: str) -> TrustAggregate | None:
+        with self._lock:
+            profile = self._profiles.get(str(user_id))
+            return replace(profile) if profile is not None else None
+
+    def save(self, aggregate: TrustAggregate) -> None:
+        with self._lock:
+            self._profiles[str(aggregate.user_id)] = replace(aggregate)
+
+    def all(self) -> tuple[TrustAggregate, ...]:
+        with self._lock:
+            return tuple(replace(profile) for profile in self._profiles.values())
 
 
 class MemoryListingImageRepository(ListingImageRepository):

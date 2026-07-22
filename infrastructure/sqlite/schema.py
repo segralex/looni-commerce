@@ -118,3 +118,27 @@ CREATE_EVENT_OUTBOX = (
     CREATE INDEX IF NOT EXISTS idx_event_outbox_occurred_at ON event_outbox (occurred_at);
     """
 )
+
+CREATE_TRUST_PROFILES = (
+    """
+    CREATE TABLE IF NOT EXISTS trust_profiles (
+        user_id TEXT PRIMARY KEY,
+        trust_score INTEGER NOT NULL,
+        verification_level TEXT NOT NULL,
+        completed_transactions INTEGER NOT NULL DEFAULT 0,
+        successful_sales INTEGER NOT NULL DEFAULT 0,
+        successful_purchases INTEGER NOT NULL DEFAULT 0,
+        successful_trades INTEGER NOT NULL DEFAULT 0,
+        reviews_received INTEGER NOT NULL DEFAULT 0,
+        reviews_given INTEGER NOT NULL DEFAULT 0,
+        disputes_opened INTEGER NOT NULL DEFAULT 0,
+        disputes_won INTEGER NOT NULL DEFAULT 0,
+        disputes_lost INTEGER NOT NULL DEFAULT 0,
+        last_activity TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_trust_profiles_user_id ON trust_profiles (user_id);
+    CREATE INDEX IF NOT EXISTS idx_trust_profiles_trust_score ON trust_profiles (trust_score);
+    """
+)
